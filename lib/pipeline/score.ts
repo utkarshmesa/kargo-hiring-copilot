@@ -8,7 +8,7 @@ import { countedDims, rank, type RankResult, type RoleApplied } from "@/lib/scor
 
 // Steps 6–8 for one prepared CV, without the database.
 
-export type Score = (profileText: string) => Promise<ScorerRun>;
+export type Score = (profileText: string, runIndex: number) => Promise<ScorerRun>;
 export type Write = (evidence: unknown) => Promise<Brief & { removed: string[] }>;
 
 export type ScoreContext = {
@@ -22,7 +22,7 @@ export type ScoreContext = {
 
 /** Step 6: runsPerCv independent Scorer calls, each a fresh request. */
 export async function scoreRuns(ctx: ScoreContext, score: Score): Promise<ScorerRun[]> {
-  return Promise.all(Array.from({ length: ctx.config.runsPerCv }, () => score(ctx.profileText)));
+  return Promise.all(Array.from({ length: ctx.config.runsPerCv }, (_, i) => score(ctx.profileText, i)));
 }
 
 export function rankRuns(ctx: ScoreContext, runs: ScorerRun[]): RankResult {

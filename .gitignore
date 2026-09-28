@@ -47,3 +47,6 @@ next-env.d.ts
 
 # calibration run outputs (contain CV-derived quotes)
 /calibration/results/
+
+# local dev database (npm run db:local)
+/.local-db/

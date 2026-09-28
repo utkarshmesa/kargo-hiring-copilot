@@ -76,8 +76,10 @@ export function scorerSystemPrompt(): string {
   ].join("\n\n");
 }
 
-export async function runScorer(profileText: string) {
+/** runIndex 0, 1, 2 → seeds base, base+1, base+2: independent but reproducible runs. */
+export async function runScorer(profileText: string, runIndex = 0) {
   return generateJson({
+    seedOffset: runIndex,
     system: scorerSystemPrompt(),
     user: `<profile>\n${profileText}</profile>`,
     schema: scorerSchema,

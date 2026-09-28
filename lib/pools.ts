@@ -19,10 +19,17 @@ export async function createPool(db: Db, name: string, config: PoolConfig = defa
   return row;
 }
 
-/** The newest open pool; the app starts with one, created on first use. */
+/**
+ * The newest pool, open or closed; the app starts with one, created on first use. A
+ * closed pool stays visible (its retention clock is running) and accepts no uploads.
+ */
 export async function currentPool(db: Db): Promise<Pool> {
-  const [open] = await db.select().from(pools).where(isNull(pools.closedAt)).orderBy(desc(pools.createdAt)).limit(1);
-  return open ?? createPool(db, FIRST_POOL_NAME);
+  const [latest] = await db.select().from(pools).orderBy(desc(pools.createdAt)).limit(1);
+  return latest ?? createPool(db, FIRST_POOL_NAME);
+}
+
+export async function openPoolCount(db: Db): Promise<number> {
+  return (await db.select({ id: pools.id }).from(pools).where(isNull(pools.closedAt))).length;
 }
 
 export function poolConfig(pool: Pool): PoolConfig {

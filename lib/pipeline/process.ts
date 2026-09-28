@@ -1,7 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { candidates, evaluations, pools } from "@/lib/db/schema";
-import { InvalidOutputError, TransientGeminiError } from "@/lib/gemini/client";
+import { GEMINI_SEED, GEMINI_TEMPERATURE, InvalidOutputError, TransientGeminiError } from "@/lib/gemini/client";
 import type { ExtractorOutput } from "@/lib/gemini/extractor";
 import type { ScorerRun } from "@/lib/gemini/scorer";
 import { poolConfig } from "@/lib/pools";
@@ -68,9 +68,11 @@ async function scoreStage(id: string, deps: Deps): Promise<Outcome> {
   };
 
   // Raw runs are stored first: totals and tiers are always recomputable from them.
-  let stored = ev.runScoresJson as { runs: ScorerRun[]; modelId: string } | null;
+  type StoredRuns = { runs: ScorerRun[]; modelId: string; seeds?: number[]; temperature?: number };
+  let stored = ev.runScoresJson as StoredRuns | null;
   if (!stored) {
-    stored = { runs: await scoreRuns(ctx, deps.score), modelId: deps.modelId };
+    const runs = await scoreRuns(ctx, deps.score);
+    stored = { runs, modelId: deps.modelId, seeds: runs.map((_, i) => GEMINI_SEED + i), temperature: GEMINI_TEMPERATURE };
     await db.update(evaluations).set({ runScoresJson: stored, modelId: deps.modelId }).where(eq(evaluations.id, id));
   }
   const r = rankRuns(ctx, stored.runs);
@@ -184,8 +186,9 @@ async function prepareStage(ev: typeof evaluations.$inferSelect, deps: Deps): Pr
     await db
       .update(evaluations)
       .set({
-        status: "queued",
-        claimedAt: null,
+        // Still claimed: scoring continues in this same invocation (or the caller
+        // releases it to `queued` when the calibration gate is closed).
+        status: "processing",
         flags: [...flags],
         visibleTextHash: result.visibleTextHash,
         redactedProfileText: result.profile.text,

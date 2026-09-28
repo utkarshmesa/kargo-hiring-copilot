@@ -1,4 +1,5 @@
 import Link from "next/link";
+import QueueRunner from "@/components/queue-runner";
 import CalibrationBanner from "./calibration-banner";
 
 const TABS = [
@@ -28,6 +29,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       </header>
       <CalibrationBanner />
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <QueueRunner concurrency={Math.max(1, Math.min(4, Number(process.env.GEMINI_CONCURRENCY ?? 2) || 2))} />
     </div>
   );
 }

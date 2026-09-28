@@ -30,7 +30,7 @@ export async function POST() {
     db: database,
     download: downloadFile,
     extract: async (text) => (await runExtractor(text)).data,
-    score: async (profile) => (await runScorer(profile)).data,
+    score: async (profile, runIndex) => (await runScorer(profile, runIndex)).data,
     write: runWriter,
     modelId: modelId(),
     allowScoring: gateOpen,

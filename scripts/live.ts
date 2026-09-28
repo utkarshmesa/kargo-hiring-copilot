@@ -33,7 +33,7 @@ export async function runLive(bytes: Uint8Array, asOf: Date, roleApplied: RoleAp
   );
   if (prepared.kind !== "ok") return { ok: false, prepared };
   const ctx = { profileText: prepared.profile.text, profileJson: prepared.profile.json, extractor: prepared.extractor, asOf, roleApplied, config };
-  const runs = await withRetry(() => scoreRuns(ctx, async (p) => (await runScorer(p)).data), `${label} scorer`);
+  const runs = await withRetry(() => scoreRuns(ctx, async (p, i) => (await runScorer(p, i)).data), `${label} scorer`);
   const rank = rankRuns(ctx, runs);
   if (prepared.parsed.integrityCheck && !rank.flags.includes("INTEGRITY_CHECK")) rank.flags.push("INTEGRITY_CHECK");
   let briefOk = false;

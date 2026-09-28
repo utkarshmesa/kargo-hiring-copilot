@@ -126,3 +126,20 @@ describe("scoring stage (Steps 6–8 persisted)", () => {
     expect(e.flags).toContain("UNSTABLE_SCORE");
   });
 });
+
+describe("claim safety", () => {
+  it("keeps the CV claimed (processing) between redaction and scoring", async () => {
+    const { claimNext } = await import("@/lib/db/claim");
+    const profile = buildRedactedProfile(c.extractor, AS_OF);
+    let claimedDuringScoring: unknown = "not checked";
+    const d = await deps({
+      score: vi.fn(async () => {
+        claimedDuringScoring = await claimNext(db, { preScoringOnly: false });
+        return mockRun(c, profile.json);
+      }),
+    });
+    await db.update(evaluations).set({ status: "processing", claimedAt: new Date() }).where(eq(evaluations.id, evId));
+    expect(await processEvaluation(evId, d)).toBe("scored");
+    expect(claimedDuringScoring).toBeNull();
+  });
+});

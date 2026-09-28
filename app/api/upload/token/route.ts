@@ -21,6 +21,7 @@ export async function POST(request: Request) {
   if (size > MAX_FILE_BYTES) return NextResponse.json({ error: "File is larger than 10 MB" }, { status: 413 });
 
   const pool = await currentPool(db());
+  if (pool.closedAt) return NextResponse.json({ error: "This pool is closed; no new uploads." }, { status: 409 });
   // Random path: nothing about the candidate is in it.
   const path = `${pool.id}/${randomUUID()}${ext}`;
   const signedUrl = await createUploadUrl(path);

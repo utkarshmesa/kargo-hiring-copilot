@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type Role = "PM" | "SPM" | "NOT_SURE";
 type Row = {
@@ -20,7 +20,7 @@ type LocalUpload = { name: string; state: "uploading" | "error"; message?: strin
 const ROLE_LABEL: Record<Role, string> = { PM: "PM", SPM: "Senior PM", NOT_SURE: "Not sure" };
 
 function chip(r: Row): { label: string; className: string } {
-  if (r.status === "queued" && r.prepared) return { label: "redacted · waiting for calibration", className: "bg-sky-100 text-sky-900" };
+  if (r.status === "queued" && r.prepared) return { label: "redacted · waiting to be scored", className: "bg-sky-100 text-sky-900" };
   switch (r.status) {
     case "queued":
       return { label: "queued", className: "bg-zinc-100 text-zinc-800" };
@@ -35,14 +35,11 @@ function chip(r: Row): { label: string; className: string } {
   }
 }
 
-export default function UploadClient({ concurrency }: { concurrency: number }) {
+export default function UploadClient() {
   const [role, setRole] = useState<Role>("PM");
   const [legacy, setLegacy] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [uploads, setUploads] = useState<LocalUpload[]>([]);
-  const [draining, setDraining] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const drainingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/evaluations", { cache: "no-store" });
@@ -52,36 +49,17 @@ export default function UploadClient({ concurrency }: { concurrency: number }) {
   useEffect(() => {
     const first = setTimeout(refresh, 0);
     const t = setInterval(refresh, 3000);
+    window.addEventListener("kargo:processed", refresh);
     return () => {
       clearTimeout(first);
       clearInterval(t);
+      window.removeEventListener("kargo:processed", refresh);
     };
   }, [refresh]);
 
-  // Calls /api/process-next until the queue is empty, `concurrency` workers at a time.
-  const drain = useCallback(async () => {
-    if (drainingRef.current) return;
-    drainingRef.current = true;
-    setDraining(true);
-    const worker = async () => {
-      for (;;) {
-        const res = await fetch("/api/process-next", { method: "POST" }).catch(() => null);
-        if (!res) return;
-        const body = await res.json().catch(() => ({}));
-        if (res.status === 409) setNotice("Scoring is blocked until calibration passes. CVs are parsed and redacted meanwhile.");
-        if (!body.processed) return;
-        refresh();
-      }
-    };
-    await Promise.all(Array.from({ length: concurrency }, worker));
-    drainingRef.current = false;
-    setDraining(false);
-    refresh();
-  }, [concurrency, refresh]);
-
-  useEffect(() => {
-    if (rows.some((r) => r.status === "queued" && !r.prepared)) drain();
-  }, [rows, drain]);
+  // The layout's QueueRunner does the processing; this just asks it to start now.
+  const drain = () => window.dispatchEvent(new Event("kargo:drain"));
+  const busy = rows.some((r) => r.status === "processing");
 
   async function uploadOne(file: File) {
     const name = file.name;
@@ -162,8 +140,6 @@ export default function UploadClient({ concurrency }: { concurrency: number }) {
         <input type="file" multiple accept=".docx,.pdf" className="sr-only" onChange={(e) => onFiles(e.target.files)} />
       </label>
 
-      {notice ? <p className="rounded border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900">{notice}</p> : null}
-
       {uploads.length ? (
         <ul className="space-y-1 text-sm">
           {uploads.map((u) => (
@@ -177,7 +153,7 @@ export default function UploadClient({ concurrency }: { concurrency: number }) {
       <div className="rounded-lg border bg-white">
         <div className="flex items-center justify-between border-b px-4 py-2 text-sm">
           <span>
-            {rows.length} CVs in this pool{draining ? " · processing…" : ""}
+            {rows.length} CVs in this pool{busy ? " · processing…" : ""}
           </span>
           <button type="button" onClick={drain} className="rounded border px-2 py-1 hover:bg-zinc-50">
             Process queue

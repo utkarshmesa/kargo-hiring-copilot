@@ -47,9 +47,12 @@ export async function generateJson<T>(opts: {
   schema: z.ZodType<T>;
   thinking: Thinking;
   retries?: number;
+  /** Offset added to the base seed, so repeated Scorer runs are independent samples. */
+  seedOffset?: number;
 }): Promise<{ data: T; meta: CallMeta }> {
   const model = modelId();
   const retries = opts.retries ?? 2;
+  const seed = GEMINI_SEED + (opts.seedOffset ?? 0);
   const jsonSchema = z.toJSONSchema(opts.schema, { target: "draft-2020-12" });
   let lastProblem = "";
   for (let attempt = 1; attempt <= retries + 1; attempt++) {
@@ -63,7 +66,7 @@ export async function generateJson<T>(opts: {
           responseMimeType: "application/json",
           responseJsonSchema: jsonSchema,
           temperature: GEMINI_TEMPERATURE,
-          seed: GEMINI_SEED,
+          seed,
           thinkingConfig: { thinkingLevel: THINKING[opts.thinking] },
         },
       });
@@ -77,7 +80,7 @@ export async function generateJson<T>(opts: {
       if (parsed.success) {
         return {
           data: parsed.data,
-          meta: { model, thinking: opts.thinking, temperature: GEMINI_TEMPERATURE, seed: GEMINI_SEED, attempts: attempt },
+          meta: { model, thinking: opts.thinking, temperature: GEMINI_TEMPERATURE, seed, attempts: attempt },
         };
       }
       lastProblem = parsed.error.issues
