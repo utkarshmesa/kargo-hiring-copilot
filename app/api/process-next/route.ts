@@ -3,6 +3,8 @@ import { claimNext } from "@/lib/db/claim";
 import { db } from "@/lib/db/client";
 import { modelId } from "@/lib/gemini/client";
 import { runExtractor } from "@/lib/gemini/extractor";
+import { runScorer } from "@/lib/gemini/scorer";
+import { runWriter } from "@/lib/gemini/writer";
 import { processEvaluation } from "@/lib/pipeline/process";
 import { calibrationPassed, currentPool } from "@/lib/pools";
 import { downloadFile } from "@/lib/storage";
@@ -28,6 +30,10 @@ export async function POST() {
     db: database,
     download: downloadFile,
     extract: async (text) => (await runExtractor(text)).data,
+    score: async (profile) => (await runScorer(profile)).data,
+    write: runWriter,
+    modelId: modelId(),
+    allowScoring: gateOpen,
   });
   return NextResponse.json({ processed: claimed.id, outcome, gateOpen });
 }

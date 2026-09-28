@@ -52,7 +52,26 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 3. Parse (DOCX hidden/white text stripped, injection lines removed) → under 150 words is tier R `unparseable`.
 4. Gemini Extractor splits the CV (the raw output is stored only in `candidates.extractor_json`) → fidelity check (every bullet exact, ≥ 60% coverage; one retry) → identity split, record key, duplicates, `NO_CONTACT`, eligibility.
 5. Code redaction → leak check. Any leak is tier R `redaction_leak` and the profile is **not** stored.
-6. Until calibration passes, a redacted CV waits in `queued` ("waiting for calibration"); scoring arrives in Phase 2.
+6. Until calibration passes, a redacted CV waits in `queued` ("waiting for calibration").
+7. Scorer ×3 (parallel, fresh calls, thinking high). Raw runs are stored before anything else.
+8. Rank in code: per-run quote check → section cap → median / spread → reuse limit; D7 from experience computed from raw dates; totals, tier and flags from the pool config.
+9. Writer brief from verified quotes only; probes and the invite line are checked in code for forbidden topics.
+
+## Calibration (the go-live gate)
+
+```bash
+npm run calibrate
+```
+
+- Runs `calibration/*.docx` blind through Steps 2–8. Labels and join dates live in `calibration/labels.json`; the join date is each CV's as-of date for "Present".
+- **PASS** = every "Exceeds" hire's core score (D1–D6) is higher than every "Meets"/"Below" hire's.
+- The result is written to `calibrations` with the rubric hash, the pool config hash and the model ID. `/api/process-next` refuses to score (HTTP 409, amber banner) until a passing row matches all three. Changing the rubric, a pool weight or `GEMINI_MODEL` closes the gate until you re-run it.
+- A failing run prints dimension-level differences against Appendix A. Weights and anchors are never adjusted automatically.
+- Full per-run output is saved to `calibration/results/` (gitignored).
+
+## Model settings
+
+`GEMINI_MODEL` must be a stable pinned ID. Every call uses a JSON response schema, temperature 1.0 (Google's guidance for Gemini 3) with a fixed seed, and an explicit thinking level: low for the Extractor and Writer, high for the Scorer.
 
 ## Scripts
 
@@ -65,8 +84,9 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 | `npm run db:generate` | New migration from `lib/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations |
 | `npm run preview -- <files>` | Steps 2–5 on local files (parse, Extractor, redaction, leak check) with live Gemini and no database; prints the redacted profiles |
-| `npm run calibrate` | *(Phase 2)* the go-live gate |
-| `npm run regress` | *(Phase 2)* live Gemini run on the B1–B12 synthetic CVs |
+| `npm run calibrate` | The go-live gate: the 8 past hires through the full pipeline, live. Prints scores next to rubric Appendix A and PASS/FAIL; records the result in `calibrations` when `DATABASE_URL` is set |
+| `npm run regress [B1 B7 …]` | The B1–B12 synthetic CVs through live Gemini: expected tier ±1 and flags |
+| `npm run check:storage` | Verifies the private CV bucket (signed upload, download, no public access, delete) |
 
 ## Environment variables
 
@@ -89,7 +109,7 @@ See [`.env.example`](.env.example) for every variable with a description. PRD Ap
 |---|---|---|
 | 0 | Repo, Next.js, schema, config, auth, `vercel.json` | done |
 | 1 | Upload, parse and guard, Extractor, redact and verify | done (awaiting Supabase for the live upload demo) |
-| 2 | Scorer ×3, rank, tiers, flags, Writer, calibrate | — |
+| 2 | Scorer ×3, rank, tiers, flags, Writer, calibrate | done: calibrate PASS (margin 26.3); recording the pass needs DATABASE_URL |
 | 3 | Shortlist, Pipeline, candidate card, CV viewer | — |
 | 4 | Decisions, send guard, Resend, undo, webhooks | — |
 | 5 | Cron, E2E, hardening | — |

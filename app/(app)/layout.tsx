@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CalibrationBanner from "./calibration-banner";
 
 const TABS = [
   { href: "/shortlist", label: "Shortlist" },
@@ -25,6 +26,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
           </form>
         </nav>
       </header>
+      <CalibrationBanner />
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
     </div>
   );

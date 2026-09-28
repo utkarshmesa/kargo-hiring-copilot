@@ -44,3 +44,6 @@ next-env.d.ts
 # test output
 /test-results/
 /playwright-report/
+
+# calibration run outputs (contain CV-derived quotes)
+/calibration/results/

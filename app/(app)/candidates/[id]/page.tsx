@@ -5,6 +5,16 @@ import { candidates, evaluations } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
 
+type DimView = {
+  id: string;
+  score: number;
+  evidence_status: string;
+  confidence: string;
+  runScores: number[];
+  quoteMismatch: boolean;
+  evidence: { quote: string }[];
+};
+
 // Phase 1 view: identity (Arjun only) beside exactly what the AI will see.
 // The full candidate card (scores, quotes, probes, decisions) arrives in Phase 3.
 export default async function CandidatePage({ params }: PageProps<"/candidates/[id]">) {
@@ -37,6 +47,24 @@ export default async function CandidatePage({ params }: PageProps<"/candidates/[
           View original CV
         </a>
       </header>
+
+      {ev.pmTotal !== null ? (
+        <section className="rounded border bg-white p-4 text-sm">
+          <h2 className="font-medium">Scores (full candidate card arrives in Phase 3)</h2>
+          <p className="mt-1">
+            PM total {ev.pmTotal.toFixed(1)} · SPM total {ev.spmTotal?.toFixed(1)} · Core {ev.coreScore?.toFixed(1)} · best fit {ev.bestFitRole}
+          </p>
+          <ul className="mt-2 space-y-1">
+            {Object.values(((ev.dimsFinalJson as { dims?: Record<string, DimView> } | null)?.dims ?? {}) as Record<string, DimView>).map((d) => (
+              <li key={d.id}>
+                <strong>{d.id}</strong> {d.score} ({d.evidence_status}, {d.confidence}, runs {d.runScores.join("/")})
+                {d.quoteMismatch ? " · quote mismatch" : ""}
+                {d.evidence[0] ? <span className="text-zinc-600"> · “{d.evidence[0].quote}”</span> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section>
         <h2 className="font-medium">Redacted profile (the only text the Scorer and Writer receive)</h2>

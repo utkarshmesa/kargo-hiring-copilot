@@ -11,7 +11,10 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "preview": "tsx scripts/preview.ts"
+    "preview": "tsx scripts/preview.ts",
+    "calibrate": "tsx scripts/calibrate.ts",
+    "regress": "tsx scripts/regress.ts",
+    "check:storage": "tsx scripts/check-storage.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

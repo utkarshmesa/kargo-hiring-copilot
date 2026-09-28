@@ -1,0 +1,13 @@
+{
+  "_comment": "Last ratings of Kargo's 8 past hires (PRD §10) and their join dates (case pre-read). The join date is the CV's as-of date: 'Present' on a CV means when that person applied. Reference scores are rubric Appendix A. Only used by `npm run calibrate`; never sent to a model.",
+  "hires": [
+    { "file": "cv_01_rohan_desai.docx", "label": "Exceeds", "joined": "2022-07-01", "reference": { "D1": 4, "D2": 4, "D3": 3, "D4": 2, "D5": 3, "D6": 3, "core": 83.8 } },
+    { "file": "cv_02_sunita_krishnamurthy.docx", "label": "Exceeds", "joined": "2023-01-01", "reference": { "D1": 4, "D2": 3, "D3": 4, "D4": 2, "D5": 3, "D6": 4, "core": 85.0 } },
+    { "file": "cv_03_vikram_nair.docx", "label": "Meets", "joined": "2023-06-01", "reference": { "D1": 0, "D2": 2, "D3": 2, "D4": 2, "D5": 3, "D6": 0, "core": 32.5 } },
+    { "file": "cv_04_aditya_shetty.docx", "label": "Exceeds", "joined": "2023-08-01", "reference": { "D1": 4, "D2": 3, "D3": 3, "D4": 3, "D5": 3, "D6": 2, "core": 80.0 } },
+    { "file": "cv_05_preetham_rao.docx", "label": "Below", "joined": "2024-02-01", "reference": { "D1": 2, "D2": 2, "D3": 2, "D4": 2, "D5": 1, "D6": 3, "core": 50.0 } },
+    { "file": "cv_06_meghna_tiwari.docx", "label": "Exceeds", "joined": "2024-08-01", "reference": { "D1": 4, "D2": 4, "D3": 3, "D4": 2, "D5": 3, "D6": 4, "core": 86.2 } },
+    { "file": "cv_07_lavanya_iyer.docx", "label": "Exceeds", "joined": "2025-04-01", "reference": { "D1": 4, "D2": 4, "D3": 4, "D4": 4, "D5": 3, "D6": 3, "core": 95.0 } },
+    { "file": "cv_08_rahul_bose.docx", "label": "Meets", "joined": "2025-06-01", "reference": { "D1": 0, "D2": 2, "D3": 4, "D4": 2, "D5": 1, "D6": 0, "core": 35.0 } }
+  ]
+}

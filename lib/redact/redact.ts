@@ -197,12 +197,19 @@ export function renderPlaceholders(s: string): string {
 // ---------- unit-level drops ----------
 
 /** True if the unit (a bullet or a sentence) must be dropped entirely. */
-export function dropReason(unit: string): "gap" | "personal" | "language" | null {
+export function dropReason(unit: string): "gap" | "personal" | "language" | "relocation" | null {
   if (GAP_PATTERNS.some((re) => re.test(unit))) return "gap";
   if (PERSONAL_PATTERNS.some((re) => re.test(unit))) return "personal";
+  // Eligibility is recorded separately and never scored (rubric §4.6), so it must not
+  // reach the Scorer either.
+  if (RELOCATION_SENTENCE.test(unit)) return "relocation";
   if (LANGUAGE_SENTENCE.test(unit) && LANG_WORD.test(unit)) return "language";
   return null;
 }
+
+// Personal relocation statements only; "led the warehouse relocation" is work and is kept.
+const RELOCATION_SENTENCE =
+  /\b(willing|unwilling|open|happy|able|unable|ready|keen|prepared|not|cannot|can't|won't)\b.{0,25}\b(relocat\w*|move|moving)\b|\b(no|open to) relocation\b|\brelocation (is )?(not )?(possible|an option|preferred)\b|\bnotice period\b/i;
 
 // "Fluent in Marathi and English." A skills entry is handled by stripLanguages instead.
 const LANGUAGE_SENTENCE = /\b(fluent|fluency|proficient|proficiency|speak|speaks|spoken|native speaker|mother tongue|languages?)\b/i;

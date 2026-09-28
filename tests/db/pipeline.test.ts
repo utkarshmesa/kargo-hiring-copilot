@@ -15,6 +15,17 @@ beforeAll(() => {
 });
 
 let db: Db;
+// Scoring is off in these tests; scoring has its own tests.
+const base = {
+  score: async () => {
+    throw new Error("scoring not expected");
+  },
+  write: async () => {
+    throw new Error("writing not expected");
+  },
+  modelId: "test-model",
+  allowScoring: false,
+};
 let poolId: string;
 
 // A CV whose text is exactly what sampleExtractor() claims, so fidelity passes.
@@ -51,7 +62,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
   it("stores the redacted profile, identity split and flags", async () => {
     const { bytes, ex } = await sampleCvBytes();
     const { ev, cand } = await addEvaluation({ legacy: true });
-    const out = await processEvaluation(ev.id, { db, download: async () => bytes, extract: async () => ex });
+    const out = await processEvaluation(ev.id, { ...base, db, download: async () => bytes, extract: async () => ex });
     expect(out).toBe("prepared");
 
     const [e] = await db.select().from(evaluations).where(eq(evaluations.id, ev.id));
@@ -74,7 +85,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const bytes = await makeDocx(["Tiny CV", "Just a few words."]);
     const { ev } = await addEvaluation();
     let called = false;
-    const out = await processEvaluation(ev.id, { db, download: async () => bytes, extract: async () => ((called = true), sampleExtractor()) });
+    const out = await processEvaluation(ev.id, { ...base, db, download: async () => bytes, extract: async () => ((called = true), sampleExtractor()) });
     expect(out).toBe("needs_review");
     expect(called).toBe(false);
     const [e] = await db.select().from(evaluations).where(eq(evaluations.id, ev.id));
@@ -85,7 +96,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const { bytes, ex } = await sampleCvBytes();
     ex.identity.name = null; // the Extractor missed the name
     const { ev } = await addEvaluation();
-    const out = await processEvaluation(ev.id, { db, download: async () => bytes, extract: async () => ex });
+    const out = await processEvaluation(ev.id, { ...base, db, download: async () => bytes, extract: async () => ex });
     expect(out).toBe("needs_review");
     const [e] = await db.select().from(evaluations).where(eq(evaluations.id, ev.id));
     expect(e).toMatchObject({ tier: "R", tierReason: "redaction_leak", redactedProfileText: null });
@@ -96,7 +107,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const { bytes, ex } = await sampleCvBytes();
     ex.identity.emails = [];
     const { ev, cand } = await addEvaluation();
-    await processEvaluation(ev.id, { db, download: async () => bytes, extract: async () => ex });
+    await processEvaluation(ev.id, { ...base, db, download: async () => bytes, extract: async () => ex });
     const [e] = await db.select().from(evaluations).where(eq(evaluations.id, ev.id));
     expect(e.flags).toContain("NO_CONTACT");
     const [c] = await db.select().from(candidates).where(eq(candidates.id, cand.id));
@@ -107,8 +118,8 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const { bytes, ex } = await sampleCvBytes();
     const a = await addEvaluation();
     const b = await addEvaluation();
-    await processEvaluation(a.ev.id, { db, download: async () => bytes, extract: async () => ex });
-    await processEvaluation(b.ev.id, { db, download: async () => bytes, extract: async () => ex });
+    await processEvaluation(a.ev.id, { ...base, db, download: async () => bytes, extract: async () => ex });
+    await processEvaluation(b.ev.id, { ...base, db, download: async () => bytes, extract: async () => ex });
     const [ca] = await db.select().from(candidates).where(eq(candidates.id, a.cand.id));
     const [cb] = await db.select().from(candidates).where(eq(candidates.id, b.cand.id));
     expect(ca.linkedCandidateIds).toEqual([b.cand.id]);
@@ -121,6 +132,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     await db.update(evaluations).set({ attempts: 1 }).where(eq(evaluations.id, ev.id));
     const now = new Date("2026-09-28T10:00:00Z");
     const out = await processEvaluation(ev.id, {
+      ...base,
       db,
       download: async () => bytes,
       extract: async () => {
@@ -138,6 +150,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const { bytes } = await sampleCvBytes();
     const { ev } = await addEvaluation();
     await processEvaluation(ev.id, {
+      ...base,
       db,
       download: async () => bytes,
       extract: async () => {
@@ -152,6 +165,7 @@ describe("processEvaluation (Steps 2–5 persisted)", () => {
     const { ev } = await addEvaluation();
     await db.update(evaluations).set({ attempts: 3 }).where(eq(evaluations.id, ev.id));
     const out = await processEvaluation(ev.id, {
+      ...base,
       db,
       download: async () => {
         throw new Error("storage down");

@@ -52,6 +52,7 @@ export function buildRedactedProfile(ex: ExtractorOutput, asOf: Date): RedactedP
     if (reason === "gap") counts.gapUnits++;
     if (reason === "personal") counts.personalUnits++;
     if (reason === "language") counts.languages++;
+    if (reason === "relocation") counts.personalUnits++;
     return reason === null;
   };
 

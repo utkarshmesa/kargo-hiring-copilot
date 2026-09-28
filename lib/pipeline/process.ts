@@ -1,14 +1,20 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
-import { candidates, evaluations } from "@/lib/db/schema";
+import { candidates, evaluations, pools } from "@/lib/db/schema";
 import { InvalidOutputError, TransientGeminiError } from "@/lib/gemini/client";
 import type { ExtractorOutput } from "@/lib/gemini/extractor";
+import type { ScorerRun } from "@/lib/gemini/scorer";
+import { poolConfig } from "@/lib/pools";
 import { eligibility, recordKey } from "@/lib/redact/identity";
+import type { RedactedProfileJson } from "@/lib/redact/profile";
+import { rubricHash } from "@/lib/rubric";
 import { log } from "@/lib/log";
 import { prepareProfile, type Extract } from "./prepare";
+import { rankRuns, scoreRuns, writerEvidence, type Score, type ScoreContext, type Write } from "./score";
 
-// One evaluation, one invocation (PRD §8.2). Persists every outcome of Steps 2–5.
-// Scoring (Steps 6–8) is added in Phase 2; until then a prepared CV waits in `queued`.
+// One evaluation, one invocation (PRD §8.2). Each stage's output is stored before the
+// next stage runs, so a retry resumes where it stopped instead of re-calling Gemini:
+// extractor_json → redacted profile → raw Scorer runs → brief.
 
 export const MAX_ATTEMPTS = 3;
 export const MAX_TRANSIENT_RETRIES = 8;
@@ -17,23 +23,101 @@ export type Deps = {
   db: Db;
   download: (path: string) => Promise<Uint8Array>;
   extract: Extract;
+  score: Score;
+  write: Write;
+  modelId: string;
+  /** False while the calibration gate is closed: CVs are prepared but never scored. */
+  allowScoring: boolean;
   now?: () => Date;
 };
 
-type Outcome = "prepared" | "needs_review" | "requeued" | "failed";
+type Outcome = "prepared" | "scored" | "needs_review" | "requeued" | "failed";
 
 export async function processEvaluation(id: string, deps: Deps): Promise<Outcome> {
   const { db } = deps;
-  const [ev] = await db.select().from(evaluations).where(eq(evaluations.id, id));
-  if (!ev) throw new Error("evaluation not found");
-  const [cand] = await db.select().from(candidates).where(eq(candidates.id, ev.candidateId));
-
+  const [first] = await db.select().from(evaluations).where(eq(evaluations.id, id));
+  if (!first) throw new Error("evaluation not found");
   try {
-    if (ev.redactedProfileText) {
-      // Already prepared; waits for the scorer (Phase 2).
+    if (!first.redactedProfileText) {
+      const prepared = await prepareStage(first, deps);
+      if (prepared !== "prepared") return prepared;
+    }
+    if (!deps.allowScoring) {
       await db.update(evaluations).set({ status: "queued", claimedAt: null }).where(eq(evaluations.id, id));
       return "prepared";
     }
+    return await scoreStage(id, deps);
+  } catch (err) {
+    return handleError(deps, first, err);
+  }
+}
+
+async function scoreStage(id: string, deps: Deps): Promise<Outcome> {
+  const { db } = deps;
+  const [ev] = await db.select().from(evaluations).where(eq(evaluations.id, id));
+  const [cand] = await db.select().from(candidates).where(eq(candidates.id, ev.candidateId));
+  const [pool] = await db.select().from(pools).where(eq(pools.id, ev.poolId));
+  const config = poolConfig(pool);
+  const ctx: ScoreContext = {
+    profileText: ev.redactedProfileText!,
+    profileJson: ev.redactedProfileJson as RedactedProfileJson,
+    extractor: cand.extractorJson as ExtractorOutput,
+    asOf: ev.createdAt,
+    roleApplied: ev.roleApplied,
+    config,
+  };
+
+  // Raw runs are stored first: totals and tiers are always recomputable from them.
+  let stored = ev.runScoresJson as { runs: ScorerRun[]; modelId: string } | null;
+  if (!stored) {
+    stored = { runs: await scoreRuns(ctx, deps.score), modelId: deps.modelId };
+    await db.update(evaluations).set({ runScoresJson: stored, modelId: deps.modelId }).where(eq(evaluations.id, id));
+  }
+  const r = rankRuns(ctx, stored.runs);
+
+  let brief: unknown = null;
+  try {
+    brief = await deps.write(writerEvidence(r, config));
+  } catch (err) {
+    if (!(err instanceof InvalidOutputError)) throw err; // transient: requeue, runs are kept
+    brief = null; // shown as "brief unavailable"
+  }
+
+  const flags = [...new Set([...ev.flags, ...r.flags])];
+  const now = deps.now?.() ?? new Date();
+  await db
+    .update(evaluations)
+    .set({
+      status: r.tier === "R" ? "needs_review" : "scored",
+      claimedAt: null,
+      dimsFinalJson: { dims: r.dims, d7: r.d7, qualifiers: r.qualifiers, roleUsed: r.roleUsed },
+      experienceJson: r.experience,
+      pmTotal: r.pmTotal,
+      spmTotal: r.spmTotal,
+      coreScore: r.coreScore,
+      bestFitRole: r.bestFitRole,
+      tier: r.tier,
+      tierReason: r.tierReason,
+      flags,
+      briefJson: brief,
+      modelId: stored.modelId,
+      rubricHash: rubricHash(),
+      configHash: pool.configHash,
+      pipelineStatus: ev.pipelineStatus ?? "scored",
+      pipelineStatusAt: ev.pipelineStatusAt ?? now,
+      scoredAt: now,
+      lastError: null,
+    })
+    .where(eq(evaluations.id, id));
+  log("evaluation.scored", { id, tier: r.tier });
+  return r.tier === "R" ? "needs_review" : "scored";
+}
+
+async function prepareStage(ev: typeof evaluations.$inferSelect, deps: Deps): Promise<Outcome> {
+  const { db } = deps;
+  const id = ev.id;
+  const [cand] = await db.select().from(candidates).where(eq(candidates.id, ev.candidateId));
+  {
     if (!ev.filePath) throw new Error("evaluation has no file");
 
     const bytes = await deps.download(ev.filePath);
@@ -111,8 +195,6 @@ export async function processEvaluation(id: string, deps: Deps): Promise<Outcome
       .where(eq(evaluations.id, id));
     log("evaluation.prepared", { id });
     return "prepared";
-  } catch (err) {
-    return handleError(deps, ev, err);
   }
 }
 
