@@ -12,6 +12,11 @@ export async function proxy(request: NextRequest) {
   }
   const ok = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (ok) return NextResponse.next();
+  // The daily cron drains the queue by calling process-next once per CV (PRD §8.2).
+  const cronSecret = process.env.CRON_SECRET;
+  if (pathname === "/api/process-next" && cronSecret && request.headers.get("authorization") === `Bearer ${cronSecret}`) {
+    return NextResponse.next();
+  }
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "unauthorised" }, { status: 401 });
   }

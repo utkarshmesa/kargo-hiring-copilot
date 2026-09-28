@@ -31,7 +31,6 @@ Requirements: Node 24, npm.
 npm install
 cp .env.example .env.local   # then fill in values
 npm run db:migrate           # applies drizzle/ migrations (needs DATABASE_URL_DIRECT)
-npm run db:seed              # creates the first pool "PM/SPM Q4 2026"
 npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 ```
 
@@ -42,8 +41,18 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
    - "Transaction pooler" (port 6543) → `DATABASE_URL`
    - "Session pooler" (port 5432) → `DATABASE_URL_DIRECT`
 3. Project Settings → API → `SUPABASE_URL` and the `service_role` key → `SUPABASE_SERVICE_ROLE_KEY`.
-4. Migrations enable row-level security on every table with no policies, so Supabase's public REST API exposes nothing.
+4. The private Storage bucket `cvs` is created automatically on the first upload (the app refuses to run if it is public).
+5. Migrations enable row-level security on every table with no policies, so Supabase's public REST API exposes nothing.
    The app connects as the `postgres` role and is unaffected.
+
+## How a CV is processed (so far)
+
+1. The browser asks `/api/upload/token` for a signed URL, uploads the file straight to the private bucket, then calls `/api/upload/register` (status `queued`).
+2. The Upload page calls `/api/process-next` in a loop (`GEMINI_CONCURRENCY` at a time). Each call claims one CV with a single SQL statement and a lease.
+3. Parse (DOCX hidden/white text stripped, injection lines removed) → under 150 words is tier R `unparseable`.
+4. Gemini Extractor splits the CV (the raw output is stored only in `candidates.extractor_json`) → fidelity check (every bullet exact, ≥ 60% coverage; one retry) → identity split, record key, duplicates, `NO_CONTACT`, eligibility.
+5. Code redaction → leak check. Any leak is tier R `redaction_leak` and the profile is **not** stored.
+6. Until calibration passes, a redacted CV waits in `queued` ("waiting for calibration"); scoring arrives in Phase 2.
 
 ## Scripts
 
@@ -55,7 +64,7 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 | `npm test` | Vitest: unit tests and database tests on in-memory Postgres (PGlite), no network |
 | `npm run db:generate` | New migration from `lib/db/schema.ts` |
 | `npm run db:migrate` | Apply migrations |
-| `npm run db:seed` | Create the first pool if none exists |
+| `npm run preview -- <files>` | Steps 2–5 on local files (parse, Extractor, redaction, leak check) with live Gemini and no database; prints the redacted profiles |
 | `npm run calibrate` | *(Phase 2)* the go-live gate |
 | `npm run regress` | *(Phase 2)* live Gemini run on the B1–B12 synthetic CVs |
 
@@ -72,14 +81,14 @@ See [`.env.example`](.env.example) for every variable with a description. PRD Ap
    Set `APP_URL` to the production URL.
 3. `vercel.json` pins functions to `bom1` and schedules the daily cron at 03:30 UTC (09:00 IST).
    On the Hobby plan the cron fires once a day, anywhere within that hour.
-4. Run `npm run db:migrate` and `npm run db:seed` locally against the production database.
+4. Run `npm run db:migrate` locally against the production database. The first pool, "PM/SPM Q4 2026", is created on first use.
 
 ## Build status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repo, Next.js, schema, config, auth, `vercel.json` | done |
-| 1 | Upload, parse and guard, Extractor, redact and verify | — |
+| 1 | Upload, parse and guard, Extractor, redact and verify | done (awaiting Supabase for the live upload demo) |
 | 2 | Scorer ×3, rank, tiers, flags, Writer, calibrate | — |
 | 3 | Shortlist, Pipeline, candidate card, CV viewer | — |
 | 4 | Decisions, send guard, Resend, undo, webhooks | — |

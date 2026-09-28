@@ -1,0 +1,172 @@
+# Institutions removed from every redacted profile and checked by the leak check (PRD Step 5).
+# One entry per line, whole-word match. ALL-CAPS entries (acronyms) match case-sensitively;
+# everything else is case-insensitive. Lines starting with # are ignored.
+# Avoid acronyms that are also common logistics terms (e.g. FMS = freight management system).
+
+# Families and acronyms
+IIT
+IITs
+Indian Institute of Technology
+NIT
+NITs
+National Institute of Technology
+IIM
+IIMs
+Indian Institute of Management
+IIIT
+International Institute of Information Technology
+Indian Institute of Information Technology
+IISc
+Indian Institute of Science
+XLRI
+XLRI Jamshedpur
+Xavier School of Management
+ISB
+Indian School of Business
+BITS
+BITS Pilani
+Birla Institute of Technology and Science
+Birla Institute of Technology
+Faculty of Management Studies
+JBIMS
+Jamnalal Bajaj Institute of Management Studies
+SPJIMR
+S.P. Jain Institute of Management and Research
+SP Jain
+MDI
+Management Development Institute
+IIFT
+Indian Institute of Foreign Trade
+NMIMS
+Narsee Monjee Institute of Management Studies
+SIBM
+Symbiosis
+Symbiosis Institute of Business Management
+TISS
+Tata Institute of Social Sciences
+NIFT
+NID
+National Institute of Design
+IRMA
+MICA
+Great Lakes Institute of Management
+IMT Ghaziabad
+Indian Institute of Export Management
+IIEM
+Indian Institute of Materials Management
+IIMM
+
+# Universities
+University of Mumbai
+Mumbai University
+University of Delhi
+Delhi University
+DU
+Savitribai Phule Pune University
+Pune University
+University of Pune
+Anna University
+Jadavpur University
+University of Calcutta
+Calcutta University
+Osmania University
+University of Hyderabad
+Bangalore University
+Visvesvaraya Technological University
+VTU
+Manipal University
+Manipal Institute of Technology
+Manipal Academy of Higher Education
+VIT
+Vellore Institute of Technology
+SRM
+SRM Institute of Science and Technology
+Amity University
+Christ University
+Banaras Hindu University
+BHU
+Aligarh Muslim University
+AMU
+Jamia Millia Islamia
+Jawaharlal Nehru University
+JNU
+University of Madras
+Madras University
+Mumbai University Institute of Chemical Technology
+Institute of Chemical Technology
+ICT Mumbai
+Delhi Technological University
+DTU
+Delhi College of Engineering
+Netaji Subhas University of Technology
+NSUT
+Thapar Institute of Engineering and Technology
+Thapar University
+PES University
+RV College of Engineering
+R.V. College of Engineering
+RVCE
+BMS College of Engineering
+MS Ramaiah Institute of Technology
+College of Engineering Pune
+COEP
+Veermata Jijabai Technological Institute
+VJTI
+Sardar Patel Institute of Technology
+Dwarkadas J. Sanghvi College of Engineering
+PSG College of Technology
+Kirori Mal College
+Hindu College
+Hansraj College
+Lady Shri Ram College
+Miranda House
+Shri Ram College of Commerce
+SRCC
+St. Stephen's College
+St Stephen's College
+St. Xavier's College
+St Xavier's College
+Loyola College
+Madras Christian College
+Presidency College
+Presidency University
+Fergusson College
+Symbiosis International University
+HR College of Commerce & Economics
+HR College of Commerce and Economics
+H.R. College
+Narsee Monjee College of Commerce and Economics
+Mithibai College
+Jai Hind College
+KC College
+Ruia College
+Sydenham College
+Podar College
+Wilson College
+Elphinstone College
+Mount Carmel College
+St. Joseph's College
+St Joseph's College
+Stella Maris College
+Women's Christian College
+Ethiraj College
+IIT Bombay
+IIT Delhi
+IIT Madras
+IIT Kanpur
+IIT Kharagpur
+IIT Roorkee
+IIT Guwahati
+IIT Hyderabad
+NIT Calicut
+NIT Tiruchirappalli
+NIT Trichy
+NIT Warangal
+NIT Surathkal
+NITK
+IIM Ahmedabad
+IIM Bangalore
+IIM Calcutta
+IIM Lucknow
+IIM Kozhikode
+IIM Indore

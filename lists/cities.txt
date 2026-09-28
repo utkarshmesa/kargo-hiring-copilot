@@ -1,0 +1,191 @@
+# Locations removed from every redacted profile and checked by the leak check (PRD Step 5).
+# One entry per line, case-insensitive, whole-word match. Lines starting with # are ignored.
+# Countries are deliberately not listed (they describe markets, e.g. "clients across the Middle East").
+
+# Metros and major cities (with common alternate names)
+Mumbai
+Bombay
+Navi Mumbai
+Thane
+Delhi
+New Delhi
+NCR
+Delhi NCR
+Gurugram
+Gurgaon
+Noida
+Greater Noida
+Faridabad
+Ghaziabad
+Bengaluru
+Bangalore
+Chennai
+Madras
+Hyderabad
+Secunderabad
+Kolkata
+Calcutta
+Pune
+Ahmedabad
+Surat
+Vadodara
+Baroda
+Jaipur
+Lucknow
+Kanpur
+Nagpur
+Indore
+Bhopal
+Visakhapatnam
+Vizag
+Coimbatore
+Kochi
+Cochin
+Ernakulam
+Madurai
+Mysuru
+Mysore
+Mangaluru
+Mangalore
+Nashik
+Aurangabad
+Ludhiana
+Amritsar
+Chandigarh
+Mohali
+Vijayawada
+Guntur
+Tiruchirappalli
+Trichy
+Kozhikode
+Calicut
+Thrissur
+Jamshedpur
+Ranchi
+Patna
+Bhubaneswar
+Cuttack
+Guwahati
+Dehradun
+Varanasi
+Agra
+Meerut
+Rajkot
+Jodhpur
+Udaipur
+Kota
+Raipur
+Jabalpur
+Gwalior
+Hubli
+Dharwad
+Belgaum
+Belagavi
+Salem
+Tirupur
+Vellore
+Warangal
+Nellore
+Kakinada
+Manipal
+Pilani
+Kharagpur
+Roorkee
+Durgapur
+Siliguri
+Goa
+Panaji
+Margao
+Vasco da Gama
+Puducherry
+Pondicherry
+Shimla
+Srinagar
+Jammu
+Imphal
+Shillong
+Aizawl
+Kohima
+Agartala
+Itanagar
+Gangtok
+Dispur
+Gandhinagar
+Thiruvananthapuram
+Trivandrum
+Amaravati
+Port Blair
+Kavaratti
+Silvassa
+Daman
+Leh
+
+# States and union territories
+Maharashtra
+Karnataka
+Tamil Nadu
+Kerala
+Telangana
+Andhra Pradesh
+Gujarat
+Rajasthan
+Uttar Pradesh
+Madhya Pradesh
+West Bengal
+Bihar
+Odisha
+Orissa
+Punjab
+Haryana
+Himachal Pradesh
+Uttarakhand
+Jharkhand
+Chhattisgarh
+Assam
+Meghalaya
+Manipur
+Mizoram
+Nagaland
+Tripura
+Arunachal Pradesh
+Sikkim
+Jammu and Kashmir
+Ladakh
+Lakshadweep
+Andaman and Nicobar
+
+# Regions
+South India
+North India
+East India
+West India
+Western India
+Northern India
+Southern India
+Eastern India
+Northeast India
+North East India
+Central India
+
+# Ports and logistics hubs that reveal a place
+JNPT
+Nhava Sheva
+Jawaharlal Nehru Port
+Mundra
+Kandla
+Deendayal Port
+Haldia
+Paradip
+Tuticorin
+Thoothukudi
+Ennore
+Kattupalli
+Krishnapatnam
+Pipavav
+Hazira
+Vizhinjam
+Cochin Port
+Chennai Port
+Kolkata Port
+Mumbai Port
+Bhiwandi

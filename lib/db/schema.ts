@@ -74,6 +74,8 @@ export const candidates = pgTable(
     urls: text("urls").array().notNull().default(sql`'{}'::text[]`),
     eligibilityRelocate: eligibilityEnum("eligibility_relocate").notNull().default("unstated"),
     extractorJson: jsonb("extractor_json"),
+    // Hidden text and removed injection lines: may contain anything, so kept with identity.
+    parseLogJson: jsonb("parse_log_json"),
     linkedCandidateIds: uuid("linked_candidate_ids").array().notNull().default(sql`'{}'::uuid[]`),
     noContact: boolean("no_contact").notNull().default(false),
     legacy: boolean("legacy").notNull().default(false),

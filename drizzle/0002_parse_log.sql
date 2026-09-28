@@ -1,0 +1,1 @@
+ALTER TABLE "candidates" ADD COLUMN "parse_log_json" jsonb;
