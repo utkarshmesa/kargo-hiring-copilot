@@ -24,8 +24,17 @@ export async function createPool(db: Db, name: string, config: PoolConfig = defa
  * closed pool stays visible (its retention clock is running) and accepts no uploads.
  */
 export async function currentPool(db: Db): Promise<Pool> {
-  const [latest] = await db.select().from(pools).orderBy(desc(pools.createdAt)).limit(1);
-  return latest ?? createPool(db, FIRST_POOL_NAME);
+  const latest = async () => (await db.select().from(pools).orderBy(desc(pools.createdAt)).limit(1))[0];
+  const found = await latest();
+  if (found) return found;
+  // Several requests can arrive at once on a fresh database: the unique name makes the
+  // insert happen once, and every caller reads back the same row.
+  const valid = parsePoolConfig(defaultConfig);
+  await db
+    .insert(pools)
+    .values({ name: FIRST_POOL_NAME, configJson: valid, configHash: configHash(valid), rubricHash: rubricHash() })
+    .onConflictDoNothing();
+  return (await latest())!;
 }
 
 export async function openPoolCount(db: Db): Promise<number> {

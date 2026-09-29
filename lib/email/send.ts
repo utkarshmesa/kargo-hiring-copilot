@@ -223,6 +223,39 @@ export async function cancelDecisionEmails(decisionId: string, deps: Deps): Prom
   return { ok: true, cancelled };
 }
 
+/**
+ * Backstop for missed webhooks: ask Resend what happened to emails whose send time has
+ * passed but that we still think are scheduled. Statuses only move forward.
+ */
+export async function syncPastDueEmails(deps: Deps & { limit?: number }): Promise<number> {
+  const { db } = deps;
+  const now = deps.now?.() ?? new Date();
+  const resend = deps.resend ?? resendClient();
+  const due = await db.select().from(emails).where(eq(emails.status, "scheduled"));
+  const past = due.filter((e) => e.resendId && e.scheduledAt && e.scheduledAt.getTime() < now.getTime() - 5 * 60_000).slice(0, deps.limit ?? 50);
+  const MAP: Record<string, "sent" | "delivered" | "bounced" | "failed" | "cancelled"> = {
+    sent: "sent",
+    delivered: "delivered",
+    opened: "delivered",
+    clicked: "delivered",
+    delivery_delayed: "sent",
+    bounced: "bounced",
+    complained: "delivered",
+    failed: "failed",
+    suppressed: "failed",
+    canceled: "cancelled",
+  };
+  let updated = 0;
+  for (const e of past) {
+    const { data } = await resend.emails.get(e.resendId!);
+    const next = data ? MAP[data.last_event] : undefined;
+    if (!next) continue;
+    await db.update(emails).set({ status: next }).where(and(eq(emails.id, e.id), eq(emails.status, "scheduled")));
+    updated++;
+  }
+  return updated;
+}
+
 /** Svix signature check on the raw body (PRD Step 12). Throws if invalid. */
 export function verifyWebhook(rawBody: string, headers: { id: string; timestamp: string; signature: string }, resend?: ResendLike) {
   const secret = process.env.RESEND_WEBHOOK_SECRET;

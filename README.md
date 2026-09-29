@@ -45,10 +45,10 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 5. Migrations enable row-level security on every table with no policies, so Supabase's public REST API exposes nothing.
    The app connects as the `postgres` role and is unaffected.
 
-## How a CV is processed (so far)
+## How a CV is processed
 
 1. The browser asks `/api/upload/token` for a signed URL, uploads the file straight to the private bucket, then calls `/api/upload/register` (status `queued`).
-2. The Upload page calls `/api/process-next` in a loop (`GEMINI_CONCURRENCY` at a time). Each call claims one CV with a single SQL statement and a lease.
+2. Any open dashboard page calls `/api/process-next` in a loop (`GEMINI_CONCURRENCY` at a time). Each call claims one CV with a single SQL statement and a lease.
 3. Parse (DOCX hidden/white text stripped, injection lines removed) → under 150 words is tier R `unparseable`.
 4. Gemini Extractor splits the CV (the raw output is stored only in `candidates.extractor_json`) → fidelity check (every bullet exact, ≥ 60% coverage; one retry) → identity split, record key, duplicates, `NO_CONTACT`, eligibility.
 5. Code redaction → leak check. Any leak is tier R `redaction_leak` and the profile is **not** stored.
@@ -65,6 +65,25 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 - **Pipeline:** everyone with status, days in status, last email and bounce flag, plus weeks left to the offer target.
 - **Settings:** weights and toggles until the first decision locks the pool. Saving re-scores the pool from stored runs (no Gemini calls) and closes the calibration gate until `npm run calibrate` passes again. "Close pool" stops uploads and starts the retention clock.
 - While any dashboard page is open it processes the queue (`GEMINI_CONCURRENCY` CVs at a time).
+
+## Decisions and email (the Cut)
+
+- **Advance / Hold / Decline** on the candidate card, with the exact email previewed. The decision records the tier the system recommended, so overrides are visible later. The first decision locks the pool's config.
+- Emails are the fixed templates in PRD Appendix B (`lib/email/templates.ts`) plus the privacy footer. The only AI-written text that can reach a candidate is the Advance "personal line", which Arjun sees and can edit. **Declines contain no AI text.**
+- Scheduled with Resend: Advance +10 min, Hold +10 min, Decline +24 h. **Undo** cancels the send until then; if Resend has already sent it, the card says so.
+- `lib/email/send.ts` is the only file allowed to call Resend. It refuses any candidate email without a matching, non-undone decision. A unique index on `emails(decision_id, kind)` plus the Resend idempotency key `${decisionId}:${kind}` make a second send impossible. The digest is the only email without a decision and can only go to `ARJUN_EMAIL`.
+- `EMAIL_REDIRECT_TO` (set it everywhere except real go-live) sends every candidate email to a test inbox instead of the CV's address.
+- Replies go to `ARJUN_EMAIL`. Bounces arrive through `/api/webhooks/resend` (Svix signature verified on the raw body) and show a red **Bounced** flag.
+
+## Daily cron (`/api/cron`, 09:00 IST)
+
+1. Reconciles emails past their send time with Resend (backstop for missed webhooks) and flags bounces.
+2. Sends **one** nudge to candidates Advanced ≥ 3 days ago who haven't booked.
+3. Sends Arjun's digest (Holds due today at the top; waiting, interviewed, not booked, bounced, pipeline counts, weeks to 31 Dec).
+4. Deletes CV files and identity 180 days after a pool is closed, and strips all CV-derived text; numeric scores, tiers, flags, hashes and decisions are kept.
+5. Drains the queue, one `/api/process-next` call per CV.
+
+Every job is safe to run twice. Trigger it by hand with `curl -H "Authorization: Bearer $CRON_SECRET" $APP_URL/api/cron`.
 
 ## Calibration (the go-live gate)
 
@@ -96,6 +115,7 @@ npm run calibrate
 | `npm run calibrate` | The go-live gate: the 8 past hires through the full pipeline, live. Prints scores next to rubric Appendix A and PASS/FAIL; records the result in `calibrations` when `DATABASE_URL` is set |
 | `npm run regress [B1 B7 …]` | The B1–B12 synthetic CVs through live Gemini: expected tier ±1 and flags |
 | `npm run db:local` | Local stand-in database (PGlite over the Postgres protocol, data in `.local-db/`) so the app runs without a hosted DB. Set `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:54329/postgres`. It mirrors the latest passing calibration result. Dev only |
+| `npm run e2e` | Playwright end-to-end in Edge: upload → score → Advance → Undo → Decline → Undo, against the real app, Gemini and Resend (every test email is undone). Starts `db:local` and `dev` if they aren't running |
 | `npm run check:storage` | Verifies the private CV bucket (signed upload, download, no public access, delete) |
 
 ## Environment variables
@@ -106,20 +126,24 @@ See [`.env.example`](.env.example) for every variable with a description. PRD Ap
 
 ## Deploy (Vercel)
 
-1. Push the repo to GitHub and import it in Vercel.
-2. Add every variable from `.env.example` under Project → Settings → Environment Variables (Production).
-   Set `APP_URL` to the production URL.
-3. `vercel.json` pins functions to `bom1` and schedules the daily cron at 03:30 UTC (09:00 IST).
-   On the Hobby plan the cron fires once a day, anywhere within that hour.
-4. Run `npm run db:migrate` locally against the production database. The first pool, "PM/SPM Q4 2026", is created on first use.
+1. **Database:** migrations are already applied to the Supabase project and the passing calibration is recorded there. For a new database: `npm run db:migrate`, then `npm run calibrate`.
+2. **Import** the GitHub repo in Vercel (framework: Next.js). `vercel.json` pins functions to `bom1` (Mumbai) and schedules the cron at 03:30 UTC (09:00 IST).
+3. **Environment variables** (Project → Settings → Environment Variables, Production), everything in `.env.example`:
+   `DATABASE_URL` (Supabase **transaction pooler**, port 6543, including the DB password), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_CONCURRENCY`, `RESEND_API_KEY` (full access), `RESEND_WEBHOOK_SECRET`, `EMAIL_FROM`, `EMAIL_REDIRECT_TO`, `ARJUN_EMAIL`, `BOOKING_URL`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `HMAC_SECRET`, `CRON_SECRET`, `APP_URL` (the production URL).
+   Use fresh random values for `ADMIN_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET`. Keep `HMAC_SECRET` fixed once CVs exist, or duplicate detection breaks.
+4. **Resend webhook:** Resend → Webhooks → add `https://<your-app>/api/webhooks/resend` for `email.sent`, `email.delivered`, `email.bounced`, `email.complained` and `email.failed`; put its signing secret in `RESEND_WEBHOOK_SECRET`.
+5. **Sending domain:** `onboarding@resend.dev` only delivers to your own Resend account address, which is enough for testing with `EMAIL_REDIRECT_TO`. For real candidates, verify a domain you own in Resend (a `*.vercel.app` domain can't be verified) and set `EMAIL_FROM` on it.
+6. **Go-live:** clear `EMAIL_REDIRECT_TO` only once the domain is verified, `BOOKING_URL` is real, and you have done one full test yourself.
+
+On the Hobby plan the cron fires once a day, anywhere within 09:00–10:00 IST.
 
 ## Build status
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repo, Next.js, schema, config, auth, `vercel.json` | done |
-| 1 | Upload, parse and guard, Extractor, redact and verify | done (awaiting Supabase for the live upload demo) |
-| 2 | Scorer ×3, rank, tiers, flags, Writer, calibrate | done: calibrate PASS (margin 26.3); recording the pass needs DATABASE_URL |
+| 1 | Upload, parse and guard, Extractor, redact and verify | done |
+| 2 | Scorer ×3, rank, tiers, flags, Writer, calibrate | done: calibrate PASS (margin 26.3), recorded in Supabase |
 | 3 | Shortlist, Pipeline, candidate card, CV viewer, Settings | done |
-| 4 | Decisions, send guard, Resend, undo, webhooks | — |
-| 5 | Cron, E2E, hardening | — |
+| 4 | Decisions, send guard, Resend, undo, webhooks | done |
+| 5 | Cron, E2E, hardening | done |

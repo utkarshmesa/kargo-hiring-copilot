@@ -47,17 +47,22 @@ export const emailStatusEnum = pgEnum("email_status", [
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const pools = pgTable("pools", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull(),
-  roleScope: text("role_scope").notNull().default("PM/SPM"),
-  createdAt: createdAt(),
-  closedAt: timestamp("closed_at", { withTimezone: true }),
-  configJson: jsonb("config_json").notNull(),
-  configHash: text("config_hash").notNull(),
-  rubricHash: text("rubric_hash").notNull(),
-  lockedAt: timestamp("locked_at", { withTimezone: true }),
-});
+export const pools = pgTable(
+  "pools",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    roleScope: text("role_scope").notNull().default("PM/SPM"),
+    createdAt: createdAt(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    configJson: jsonb("config_json").notNull(),
+    configHash: text("config_hash").notNull(),
+    rubricHash: text("rubric_hash").notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+  },
+  // One row per pool name, so concurrent first requests can't create duplicate pools.
+  (t) => [uniqueIndex("pools_name_uq").on(t.name)],
+);
 
 export const candidates = pgTable(
   "candidates",

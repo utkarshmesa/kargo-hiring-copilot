@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "pools_name_uq" ON "pools" USING btree ("name");

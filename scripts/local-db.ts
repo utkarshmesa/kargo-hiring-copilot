@@ -33,6 +33,15 @@ async function main() {
   const server = new PGLiteSocketServer({ db: pg, port: 54329, host: "127.0.0.1", maxConnections: 20 });
   await server.start();
   console.log("Local Postgres on postgres://postgres:postgres@127.0.0.1:54329/postgres");
+
+  // Close cleanly on Ctrl+C / stop, or PGlite's data directory can be left corrupted.
+  const shutdown = async () => {
+    await server.stop().catch(() => undefined);
+    await pg.close().catch(() => undefined);
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {

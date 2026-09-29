@@ -53,3 +53,13 @@ describe("database constraints", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("first pool", () => {
+  it("concurrent first requests create exactly one pool", async () => {
+    const { currentPool } = await import("@/lib/pools");
+    const fresh = await testDb();
+    const got = await Promise.all(Array.from({ length: 5 }, () => currentPool(fresh.db as never)));
+    expect(new Set(got.map((p) => p.id)).size).toBe(1);
+    expect((await fresh.db.select().from(pools)).length).toBe(1);
+  });
+});
