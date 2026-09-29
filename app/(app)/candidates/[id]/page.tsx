@@ -2,6 +2,8 @@ import { eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { FlagBadges, TierBadge } from "@/components/badges";
+import DecisionPanel from "@/components/decision-panel";
+import { decisionPanelProps } from "@/lib/decision-view";
 import { betterFit, daysSince, PIPELINE_LABEL, rankedTotal, ROLE_LABEL } from "@/lib/dashboard";
 import { db } from "@/lib/db/client";
 import { candidates, evaluations } from "@/lib/db/schema";
@@ -40,6 +42,7 @@ export default async function CandidatePage({ params }: PageProps<"/candidates/[
         .where(inArray(evaluations.candidateId, cand.linkedCandidateIds))
     : [];
 
+  const panel = await decisionPanelProps(database, ev, cand, linked);
   const final = ev.dimsFinalJson as DimsFinal | null;
   const brief = ev.briefJson as (Brief & { removed?: string[] }) | null;
   const experience = ev.experienceJson as Experience | null;
@@ -80,6 +83,8 @@ export default async function CandidatePage({ params }: PageProps<"/candidates/[
           </a>
         </p>
       </header>
+
+      <DecisionPanel {...panel} />
 
       {ev.tier === "R" && ev.tierReason ? (
         <section className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
@@ -175,10 +180,6 @@ export default async function CandidatePage({ params }: PageProps<"/candidates/[
       <section className="rounded-lg border bg-white p-4 text-sm">
         <h2 className="font-medium">Relocation (recorded, never scored)</h2>
         <p>{RELOCATION_TEXT[cand.eligibilityRelocate]}</p>
-      </section>
-
-      <section className="rounded-lg border border-dashed bg-white p-4 text-sm text-zinc-600">
-        Advance / Decline / Hold and status updates arrive in Phase 4.
       </section>
 
       <details className="rounded-lg border bg-white p-4">
