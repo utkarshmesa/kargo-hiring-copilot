@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { Db } from "./db/client";
+import { log } from "./log";
 
 // The Supabase scheduler (pg_cron, docs/supabase-scheduler.sql) authenticates with a random
 // token that Supabase generated itself and keeps in its encrypted Vault. The app reads it
@@ -16,8 +17,9 @@ async function vaultToken(db: Db): Promise<string | null> {
     const res = (await db.execute(sql`select decrypted_secret from vault.decrypted_secrets where name = ${SECRET_NAME} limit 1`)) as unknown;
     const rows = Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? []);
     value = ((rows[0] as { decrypted_secret?: string } | undefined)?.decrypted_secret ?? null) || null;
-  } catch {
-    value = null; // no Vault (e.g. the local stand-in database)
+  } catch (err) {
+    value = null; // no Vault (the local stand-in database) or the database is unreachable
+    log("scheduler.vault_unavailable", { error: err instanceof Error ? err.name : "unknown", code: (err as { code?: string })?.code });
   }
   cached = { value, at: Date.now() };
   return value;
