@@ -135,7 +135,7 @@ See [`.env.example`](.env.example) for every variable with a description. PRD Ap
 4. **Resend webhook:** Resend → Webhooks → add `https://<your-app>/api/webhooks/resend` for `email.sent`, `email.delivered`, `email.bounced`, `email.complained` and `email.failed`; put its signing secret in `RESEND_WEBHOOK_SECRET`.
 5. **Sending domain:** `onboarding@resend.dev` only delivers to your own Resend account address, which is enough for testing with `EMAIL_REDIRECT_TO`. For real candidates, verify a domain you own in Resend (a `*.vercel.app` domain can't be verified) and set `EMAIL_FROM` on it.
 6. **Deployment Protection:** Resend's webhook, the cron and the Supabase scheduler call the app without a Vercel login. In Vercel → Settings → Deployment Protection, use *Standard Protection* (production domain public) or turn Vercel Authentication off; the app has its own login. Use the production domain from Settings → Domains everywhere.
-7. **Email scheduler:** run `docs/supabase-scheduler.sql` in Supabase → SQL Editor with your `APP_URL` and `CRON_SECRET`, so due emails go out within a minute even when no dashboard is open.
+7. **Email scheduler:** run `docs/supabase-scheduler.sql` in Supabase → SQL Editor with your `APP_URL`, so due emails go out within a minute even when no dashboard is open. It authenticates with a token Supabase generates and keeps in Vault; nothing to copy.
 8. **Go-live:** clear `EMAIL_REDIRECT_TO` only once the domain is verified, `BOOKING_URL` is real, and you have done one full test yourself.
 
 On the Hobby plan the cron fires once a day, anywhere within 09:00–10:00 IST.
