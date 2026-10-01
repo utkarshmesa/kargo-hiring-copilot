@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { Resend } from "resend";
 import type { PoolConfig } from "@/lib/config/defaults";
 import type { Db } from "@/lib/db/client";
@@ -7,20 +7,23 @@ import { log } from "@/lib/log";
 import { firstName, renderAdvance, renderDecline, renderDigest, renderHold, renderNudge, type DigestData, type Rendered, type RoleTitle } from "./templates";
 
 // PRD Step 11, "the Cut". Every Resend call in the codebase is in this file (ESLint enforces
-// it). A candidate email is sent only for a decision that exists, is not undone and matches
-// the kind. The DB unique index on (decision_id, kind) is the real guard; the Resend
-// Idempotency-Key `${decisionId}:${kind}` covers retries of the same call. The only email
-// without a decision is Arjun's digest, and it can only go to ARJUN_EMAIL.
+// it). A candidate email exists only for a decision that exists, is not undone and matches
+// the kind, and that is checked twice: when the email is scheduled and again at send time.
+// The DB unique index on (decision_id, kind) is the real guard; the Resend Idempotency-Key
+// `${decisionId}:${kind}` covers retries of the same send. The only email without a
+// decision is Arjun's digest, and it can only go to ARJUN_EMAIL.
+//
+// Scheduling is done here, not by Resend: Resend's scheduled sends fail on this account
+// while immediate sends are delivered (verified 30 Sep 2026). An email waits in `emails`
+// with status `scheduled` until `scheduled_at`; sendDueEmails() then sends it immediately.
+// Undo and send each move the row out of `scheduled` with one conditional UPDATE, so
+// exactly one of them can win.
 
 export type CandidateKind = "advance" | "decline" | "hold" | "nudge";
 
 /** The subset of the Resend SDK we use; tests pass a fake. */
 export type ResendLike = {
-  emails: {
-    send: Resend["emails"]["send"];
-    cancel: Resend["emails"]["cancel"];
-    get: Resend["emails"]["get"];
-  };
+  emails: { send: Resend["emails"]["send"]; get: Resend["emails"]["get"] };
   webhooks: { verify: Resend["webhooks"]["verify"] };
 };
 
@@ -34,26 +37,29 @@ export function resendClient(): ResendLike {
   return client;
 }
 
-export type SendResult =
-  | { ok: true; emailId: string; resendId: string; scheduledAt: Date | null }
-  | { ok: false; reason: "no_decision" | "decision_undone" | "wrong_kind" | "not_eligible" | "no_contact" | "already_sent" | "config" | "resend_error"; detail?: string };
+type Refusal = "no_decision" | "decision_undone" | "wrong_kind" | "not_eligible" | "no_contact" | "already_sent" | "config" | "resend_error";
+export type SendResult = { ok: true; emailId: string; scheduledAt: Date } | { ok: false; reason: Refusal; detail?: string };
 
 type Deps = { db: Db; resend?: ResendLike; now?: () => Date };
 
+class ConfigError extends Error {}
 function env(name: string): string {
   const v = process.env[name];
   if (!v) throw new ConfigError(`${name} is not set`);
   return v;
 }
-class ConfigError extends Error {}
 
 const ACTION_OF: Record<Exclude<CandidateKind, "nudge">, "advance" | "decline" | "hold"> = { advance: "advance", decline: "decline", hold: "hold" };
 
-export async function sendForDecision(decisionId: string, kind: CandidateKind, deps: Deps): Promise<SendResult> {
-  const { db } = deps;
-  const now = deps.now?.() ?? new Date();
+type Context = {
+  d: typeof decisions.$inferSelect;
+  ev: typeof evaluations.$inferSelect;
+  cand: typeof candidates.$inferSelect;
+  pool: typeof pools.$inferSelect;
+};
 
-  // ---- the guard ----
+// ---- the guard (runs at schedule time and again at send time) ----
+async function guard(db: Db, decisionId: string, kind: CandidateKind, atSendTime = false): Promise<{ ok: true; ctx: Context } | { ok: false; reason: Refusal; detail?: string }> {
   const [row] = await db
     .select({ d: decisions, ev: evaluations, cand: candidates, pool: pools })
     .from(decisions)
@@ -62,78 +68,132 @@ export async function sendForDecision(decisionId: string, kind: CandidateKind, d
     .innerJoin(pools, eq(pools.id, evaluations.poolId))
     .where(eq(decisions.id, decisionId));
   if (!row) return { ok: false, reason: "no_decision" };
-  const { d, ev, cand, pool } = row;
+  const { d, ev, cand } = row;
   if (d.undoneAt) return { ok: false, reason: "decision_undone" };
   if (kind === "nudge") {
     if (d.action !== "advance") return { ok: false, reason: "wrong_kind" };
     if (ev.pipelineStatus !== "advanced") return { ok: false, reason: "not_eligible", detail: "candidate is no longer in Advanced (booked or moved on)" };
-    const [adv] = await db.select().from(emails).where(and(eq(emails.decisionId, decisionId), eq(emails.kind, "advance")));
-    if (!adv || !["sent", "delivered"].includes(adv.status)) return { ok: false, reason: "not_eligible", detail: "the invite was not delivered" };
+    if (!atSendTime) {
+      const [adv] = await db.select().from(emails).where(and(eq(emails.decisionId, decisionId), eq(emails.kind, "advance")));
+      if (!adv || !["sent", "delivered"].includes(adv.status)) return { ok: false, reason: "not_eligible", detail: "the invite was not delivered" };
+    }
   } else if (d.action !== ACTION_OF[kind]) {
     return { ok: false, reason: "wrong_kind" };
   }
   if (!cand.email || cand.noContact) return { ok: false, reason: "no_contact" };
+  return { ok: true, ctx: row };
+}
 
-  // ---- content: fixed templates only ----
-  let rendered: Rendered;
-  let scheduledAt: Date | null;
+// ---- content: fixed templates only ----
+function render({ d, ev, cand }: Context, kind: CandidateKind): Rendered {
+  const roleTitle = (ev.roleTitleFinal ?? (ev.roleApplied === "SPM" ? "SPM" : "PM")) as RoleTitle;
+  const common = { firstName: firstName(cand.displayName), roleTitle, legacy: cand.legacy };
+  if (kind === "advance") {
+    return renderAdvance({ ...common, inviteLine: d.inviteLineFinal ?? "", bookingUrl: env("BOOKING_URL"), askRelocation: cand.eligibilityRelocate === "unstated" });
+  }
+  if (kind === "decline") return renderDecline(common);
+  if (kind === "hold") {
+    if (!d.holdUntil) throw new ConfigError("hold decision without a date");
+    return renderHold({ ...common, holdUntil: d.holdUntil });
+  }
+  return renderNudge({ firstName: common.firstName, roleTitle, bookingUrl: env("BOOKING_URL") });
+}
+
+function delayMinutes(kind: CandidateKind, config: PoolConfig): number {
+  return kind === "nudge" ? 0 : config.sendDelayMinutes[kind];
+}
+
+/**
+ * Schedules the email for a decision: Advance +10 min, Hold +10 min, Decline +24 h, nudge
+ * now. Nothing reaches Resend until it is due (or, for a nudge, straight away).
+ */
+export async function sendForDecision(decisionId: string, kind: CandidateKind, deps: Deps): Promise<SendResult> {
+  const { db } = deps;
+  const now = deps.now?.() ?? new Date();
+  const g = await guard(db, decisionId, kind);
+  if (!g.ok) return g;
   try {
-    const config = pool.configJson as PoolConfig;
-    const roleTitle = (ev.roleTitleFinal ?? (ev.roleApplied === "SPM" ? "SPM" : "PM")) as RoleTitle;
-    const common = { firstName: firstName(cand.displayName), roleTitle, legacy: cand.legacy };
-    const minutes = (m: number) => new Date(now.getTime() + m * 60_000);
-    if (kind === "advance") {
-      rendered = renderAdvance({
-        ...common,
-        inviteLine: d.inviteLineFinal ?? "",
-        bookingUrl: env("BOOKING_URL"),
-        askRelocation: cand.eligibilityRelocate === "unstated",
-      });
-      scheduledAt = minutes(config.sendDelayMinutes.advance);
-    } else if (kind === "decline") {
-      rendered = renderDecline(common);
-      scheduledAt = minutes(config.sendDelayMinutes.decline);
-    } else if (kind === "hold") {
-      if (!d.holdUntil) return { ok: false, reason: "wrong_kind", detail: "hold decision without a date" };
-      rendered = renderHold({ ...common, holdUntil: d.holdUntil });
-      scheduledAt = minutes(config.sendDelayMinutes.hold);
-    } else {
-      rendered = renderNudge({ firstName: common.firstName, roleTitle, bookingUrl: env("BOOKING_URL") });
-      scheduledAt = null; // sent now; it is already days after the decision
-    }
+    render(g.ctx, kind); // fail now, not at send time, if config is missing
+    env("EMAIL_FROM");
+    env("ARJUN_EMAIL");
   } catch (err) {
     if (err instanceof ConfigError) return { ok: false, reason: "config", detail: err.message };
     throw err;
   }
 
-  // ---- reserve the (decision, kind) slot before calling Resend ----
+  const scheduledAt = new Date(now.getTime() + delayMinutes(kind, g.ctx.pool.configJson as PoolConfig) * 60_000);
   const idempotencyKey = `${decisionId}:${kind}`;
-  let emailRow = (
-    await db
-      .insert(emails)
-      .values({ decisionId, evaluationId: ev.id, kind, idempotencyKey, scheduledAt, status: "pending" })
-      .onConflictDoNothing()
-      .returning()
-  )[0];
-  if (!emailRow) {
-    // Someone already holds this slot. "pending" means another call is sending it right now.
-    // Only an attempt that explicitly failed may be retried, with the same idempotency key.
-    const [existing] = await db.select().from(emails).where(and(eq(emails.decisionId, decisionId), eq(emails.kind, kind)));
-    if (!existing || existing.status !== "failed" || existing.resendId) return { ok: false, reason: "already_sent" };
-    emailRow = existing;
+  let [row] = await db
+    .insert(emails)
+    .values({ decisionId, evaluationId: g.ctx.ev.id, kind, idempotencyKey, scheduledAt, status: "scheduled" })
+    .onConflictDoNothing()
+    .returning();
+  if (!row) {
+    // The (decision, kind) slot is taken. Only an attempt that explicitly failed and never
+    // reached Resend may be rescheduled; it keeps the same idempotency key.
+    [row] = await db
+      .update(emails)
+      .set({ status: "scheduled", scheduledAt })
+      .where(and(eq(emails.decisionId, decisionId), eq(emails.kind, kind), eq(emails.status, "failed"), isNull(emails.resendId)))
+      .returning();
+    if (!row) return { ok: false, reason: "already_sent" };
   }
-
-  return deliver(db, deps.resend ?? resendClient(), emailRow.id, {
-    to: process.env.EMAIL_REDIRECT_TO || cand.email,
-    rendered,
-    scheduledAt,
-    idempotencyKey,
-  });
+  log("email.scheduled", { emailId: row.id, kind });
+  if (kind === "nudge") await sendDueEmails({ ...deps, onlyId: row.id });
+  return { ok: true, emailId: row.id, scheduledAt };
 }
 
-/** B.6: Arjun's digest. The only email without a decision; the recipient is fixed. */
-export async function sendDigest(date: string, data: DigestData, deps: Deps): Promise<SendResult> {
+/**
+ * Sends every candidate email whose time has come. Safe to call from many places at once
+ * (dashboard, cron, scheduler): each row is claimed with a single conditional UPDATE.
+ */
+export async function sendDueEmails(deps: Deps & { limit?: number; onlyId?: string }): Promise<number> {
   const { db } = deps;
+  const now = deps.now?.() ?? new Date();
+  const resend = deps.resend ?? resendClient();
+  const stuck = new Date(now.getTime() - 10 * 60_000); // a send that crashed mid-way
+  const due = or(
+    and(eq(emails.status, "scheduled"), lte(emails.scheduledAt, now)),
+    and(eq(emails.status, "pending"), isNull(emails.resendId), lt(emails.scheduledAt, stuck)),
+  );
+  const candidatesDue = await db
+    .select({ id: emails.id })
+    .from(emails)
+    .where(and(isNotNull(emails.decisionId), due, deps.onlyId ? eq(emails.id, deps.onlyId) : undefined))
+    .orderBy(asc(emails.scheduledAt))
+    .limit(deps.limit ?? 25);
+
+  let sent = 0;
+  for (const { id } of candidatesDue) {
+    // Claiming stamps scheduled_at with the attempt time, so "stuck" is measured from the
+    // claim (not the original due time) and a slow sender is never treated as crashed.
+    const [claimed] = await db.update(emails).set({ status: "pending", scheduledAt: now }).where(and(eq(emails.id, id), due)).returning();
+    if (!claimed) continue; // someone else (or Undo) got there first
+
+    // Check again at send time: the decision may have been undone, or the candidate booked.
+    const g = await guard(db, claimed.decisionId!, claimed.kind as CandidateKind, true);
+    if (!g.ok) {
+      await db.update(emails).set({ status: "cancelled" }).where(eq(emails.id, id));
+      log("email.dropped", { emailId: id, reason: g.reason });
+      continue;
+    }
+    let rendered: Rendered;
+    try {
+      rendered = render(g.ctx, claimed.kind as CandidateKind);
+    } catch {
+      await db.update(emails).set({ status: "failed" }).where(eq(emails.id, id));
+      continue;
+    }
+    const r = await deliver(db, resend, id, { to: process.env.EMAIL_REDIRECT_TO || g.ctx.cand.email!, rendered, idempotencyKey: claimed.idempotencyKey }, now);
+    if (r === "sent") sent++;
+  }
+  return sent;
+}
+
+/** B.6: Arjun's digest. The only email without a decision; the recipient is fixed. Sent now. */
+export async function sendDigest(date: string, data: DigestData, deps: Deps): Promise<{ ok: true } | { ok: false; reason: Refusal; detail?: string }> {
+  const { db } = deps;
+  const now = deps.now?.() ?? new Date();
   let to: string;
   try {
     to = env("ARJUN_EMAIL");
@@ -141,116 +201,99 @@ export async function sendDigest(date: string, data: DigestData, deps: Deps): Pr
     return { ok: false, reason: "config", detail: (err as Error).message };
   }
   const idempotencyKey = `digest:${date}`;
-  const [row] = await db.insert(emails).values({ kind: "digest", idempotencyKey, status: "pending" }).onConflictDoNothing().returning();
+  const [row] = await db.insert(emails).values({ kind: "digest", idempotencyKey, status: "pending", scheduledAt: now }).onConflictDoNothing().returning();
   if (!row) return { ok: false, reason: "already_sent" };
-  return deliver(db, deps.resend ?? resendClient(), row.id, { to, rendered: renderDigest(data), scheduledAt: null, idempotencyKey });
+  const r = await deliver(db, deps.resend ?? resendClient(), row.id, { to, rendered: renderDigest(data), idempotencyKey }, now);
+  return r === "sent" ? { ok: true } : { ok: false, reason: "resend_error" };
 }
 
-async function deliver(
-  db: Db,
-  resend: ResendLike,
-  emailId: string,
-  msg: { to: string; rendered: Rendered; scheduledAt: Date | null; idempotencyKey: string },
-): Promise<SendResult> {
+/** The single place an email leaves the system. Immediate send only. */
+async function deliver(db: Db, resend: ResendLike, emailId: string, msg: { to: string; rendered: Rendered; idempotencyKey: string }, now: Date): Promise<"sent" | "retry" | "failed"> {
   let from: string;
   let replyTo: string;
   try {
     from = env("EMAIL_FROM");
     replyTo = env("ARJUN_EMAIL");
-  } catch (err) {
+  } catch {
     await db.update(emails).set({ status: "failed" }).where(and(eq(emails.id, emailId), isNull(emails.resendId)));
-    return { ok: false, reason: "config", detail: (err as Error).message };
+    return "failed";
   }
-  const { data, error } = await resend.emails.send(
-    {
-      from,
-      to: msg.to,
-      replyTo,
-      subject: msg.rendered.subject,
-      text: msg.rendered.text,
-      html: msg.rendered.html,
-      ...(msg.scheduledAt ? { scheduledAt: msg.scheduledAt.toISOString() } : {}),
-    },
-    { idempotencyKey: msg.idempotencyKey },
-  );
-  if (error || !data) {
-    await db.update(emails).set({ status: "failed" }).where(and(eq(emails.id, emailId), isNull(emails.resendId)));
-    log("email.failed", { emailId, error: error?.name ?? "unknown" });
-    return { ok: false, reason: "resend_error", detail: error?.message };
+  let result: Awaited<ReturnType<ResendLike["emails"]["send"]>>;
+  try {
+    result = await resend.emails.send(
+      { from, to: msg.to, replyTo, subject: msg.rendered.subject, text: msg.rendered.text, html: msg.rendered.html },
+      { idempotencyKey: msg.idempotencyKey },
+    );
+  } catch {
+    result = { data: null, error: { name: "application_error", message: "network error", statusCode: 503 } } as never;
   }
-  await db
-    .update(emails)
-    .set({ resendId: data.id, status: msg.scheduledAt ? "scheduled" : "sent" })
-    .where(eq(emails.id, emailId));
-  log("email.queued", { emailId, scheduled: !!msg.scheduledAt });
-  return { ok: true, emailId, resendId: data.id, scheduledAt: msg.scheduledAt };
+  const { data, error } = result;
+  if (data && !error) {
+    await db.update(emails).set({ resendId: data.id, status: "sent" }).where(eq(emails.id, emailId));
+    log("email.sent", { emailId });
+    return "sent";
+  }
+  const status = (error as { statusCode?: number } | null)?.statusCode ?? 0;
+  if (status === 429 || status >= 500 || status === 409) {
+    // Rate limit, Resend outage, or the same key still in flight: try again in 5 minutes.
+    await db
+      .update(emails)
+      .set({ status: "scheduled", scheduledAt: new Date(now.getTime() + 5 * 60_000) })
+      .where(and(eq(emails.id, emailId), isNull(emails.resendId)));
+    log("email.retry", { emailId, status });
+    return "retry";
+  }
+  await db.update(emails).set({ status: "failed" }).where(and(eq(emails.id, emailId), isNull(emails.resendId)));
+  log("email.failed", { emailId, error: error?.name ?? "unknown" });
+  return "failed";
 }
 
-export type CancelResult = { ok: true; cancelled: number } | { ok: false; reason: "already_sent" | "resend_error"; detail?: string };
-
-/** Undo (PRD Step 11): cancel every still-scheduled email of this decision. */
-export async function cancelDecisionEmails(decisionId: string, deps: Deps): Promise<CancelResult> {
-  const { db } = deps;
-  const resend = deps.resend ?? resendClient();
-  const pending = await db.select().from(emails).where(and(eq(emails.decisionId, decisionId), inArray(emails.status, ["pending", "scheduled", "failed"])));
-  let cancelled = 0;
-  for (const e of pending) {
-    if (!e.resendId) {
-      await db.update(emails).set({ status: "cancelled" }).where(eq(emails.id, e.id));
-      cancelled++;
-      continue;
-    }
-    const { error } = await resend.emails.cancel(e.resendId);
-    if (!error) {
-      await db.update(emails).set({ status: "cancelled" }).where(eq(emails.id, e.id));
-      cancelled++;
-      continue;
-    }
-    // Undo race: the cancel failed. If it already went out, record that and stop.
-    const { data } = await resend.emails.get(e.resendId);
-    if (data && ["sent", "delivered", "opened", "clicked", "bounced", "complained", "delivery_delayed"].includes(data.last_event)) {
-      await db.update(emails).set({ status: data.last_event === "bounced" ? "bounced" : "sent" }).where(eq(emails.id, e.id));
-      return { ok: false, reason: "already_sent" };
-    }
-    if (data?.last_event === "canceled" || data?.last_event === "failed") {
-      // Nothing will be sent, so Undo can go ahead.
-      await db.update(emails).set({ status: data.last_event === "failed" ? "failed" : "cancelled" }).where(eq(emails.id, e.id));
-      cancelled++;
-      continue;
-    }
-    return { ok: false, reason: "resend_error", detail: error.message };
-  }
-  return { ok: true, cancelled };
-}
+export type CancelResult = { ok: true; cancelled: number } | { ok: false; reason: "already_sent" };
 
 /**
- * Backstop for missed webhooks: ask Resend what happened to emails whose send time has
- * passed but that we still think are scheduled. Statuses only move forward.
+ * Undo (PRD Step 11): stop every not-yet-sent email of this decision. One conditional
+ * UPDATE per call: if the sender has already claimed the row, Undo loses and says so.
  */
-export async function syncPastDueEmails(deps: Deps & { limit?: number }): Promise<number> {
+export async function cancelDecisionEmails(decisionId: string, deps: Deps): Promise<CancelResult> {
+  const { db } = deps;
+  const cancelled = await db
+    .update(emails)
+    .set({ status: "cancelled" })
+    .where(and(eq(emails.decisionId, decisionId), inArray(emails.status, ["scheduled", "failed"]), isNull(emails.resendId)))
+    .returning({ id: emails.id });
+  const [gone] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(emails)
+    .where(and(eq(emails.decisionId, decisionId), inArray(emails.status, ["pending", "sent", "delivered", "bounced"])));
+  if (gone.n > 0) return { ok: false, reason: "already_sent" };
+  return { ok: true, cancelled: cancelled.length };
+}
+
+/** Backstop for missed webhooks: ask Resend what happened to sent emails. Forward only. */
+export async function syncSentEmails(deps: Deps & { limit?: number }): Promise<number> {
   const { db } = deps;
   const now = deps.now?.() ?? new Date();
   const resend = deps.resend ?? resendClient();
-  const due = await db.select().from(emails).where(eq(emails.status, "scheduled"));
-  const past = due.filter((e) => e.resendId && e.scheduledAt && e.scheduledAt.getTime() < now.getTime() - 5 * 60_000).slice(0, deps.limit ?? 50);
-  const MAP: Record<string, "sent" | "delivered" | "bounced" | "failed" | "cancelled"> = {
-    sent: "sent",
+  const rows = await db
+    .select()
+    .from(emails)
+    .where(and(eq(emails.status, "sent"), isNotNull(emails.resendId), lt(emails.scheduledAt, new Date(now.getTime() - 10 * 60_000))))
+    .limit(deps.limit ?? 50);
+  const MAP: Record<string, "delivered" | "bounced" | "failed"> = {
     delivered: "delivered",
     opened: "delivered",
     clicked: "delivered",
-    delivery_delayed: "sent",
-    bounced: "bounced",
     complained: "delivered",
+    bounced: "bounced",
     failed: "failed",
     suppressed: "failed",
-    canceled: "cancelled",
   };
   let updated = 0;
-  for (const e of past) {
+  for (const e of rows) {
     const { data } = await resend.emails.get(e.resendId!);
     const next = data ? MAP[data.last_event] : undefined;
     if (!next) continue;
-    await db.update(emails).set({ status: next }).where(and(eq(emails.id, e.id), eq(emails.status, "scheduled")));
+    await db.update(emails).set({ status: next }).where(and(eq(emails.id, e.id), eq(emails.status, "sent")));
     updated++;
   }
   return updated;

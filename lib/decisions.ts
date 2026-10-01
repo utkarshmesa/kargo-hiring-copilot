@@ -63,14 +63,13 @@ export async function decide(input: DecideInput, deps: Deps) {
   if (!DECISION_FROM[input.action].includes(from)) throw new DecisionError(`Cannot ${input.action} from "${from}".`, 400);
 
   // A still-scheduled email must be undone before a new decision (one email in flight).
-  // Past its send time an email is out of our hands (sent, or failed): it no longer blocks.
-  const inFlight = (
-    await db
-      .select({ scheduledAt: emails.scheduledAt })
-      .from(emails)
-      .where(and(eq(emails.evaluationId, ev.id), inArray(emails.status, ["pending", "scheduled"])))
-  ).filter((m) => !m.scheduledAt || m.scheduledAt > now);
-  if (inFlight.length) throw new DecisionError("An email for this candidate is still scheduled. Undo it first.", 409);
+  // An email not yet handed to Resend is still ours: Undo it (or let it send) first, so a
+  // candidate can never get an invite and a decline that cross.
+  const inFlight = await db
+    .select({ id: emails.id })
+    .from(emails)
+    .where(and(eq(emails.evaluationId, ev.id), inArray(emails.status, ["pending", "scheduled"])));
+  if (inFlight.length) throw new DecisionError("An email for this candidate is still waiting to send. Undo it first, or wait until it has gone.", 409);
 
   let roleTitle: "PM" | "SPM";
   if (ev.roleApplied === "NOT_SURE") {
@@ -140,10 +139,10 @@ async function revert(db: Db, decisionId: string, evaluationId: string, current:
   });
 }
 
-export type UndoResult = { ok: true } | { ok: false; reason: "already_sent" | "too_late" | "not_found" | "resend_error"; detail?: string };
+export type UndoResult = { ok: true } | { ok: false; reason: "already_sent" | "too_late" | "not_found"; detail?: string };
 
-// US6: Undo while the email is still scheduled. Cancels the Resend send, marks the decision
-// undone and returns the candidate to the previous status, so Arjun can decide again.
+// US6: Undo while the email is still waiting to send. Cancels it, marks the decision undone
+// and returns the candidate to the previous status, so Arjun can decide again.
 export async function undo(decisionId: string, deps: Deps): Promise<UndoResult> {
   const { db } = deps;
   const now = deps.now?.() ?? new Date();
@@ -153,7 +152,8 @@ export async function undo(decisionId: string, deps: Deps): Promise<UndoResult> 
   if (latest?.id !== d.id) return { ok: false, reason: "too_late", detail: "a later decision exists" };
 
   const mails = await db.select().from(emails).where(eq(emails.decisionId, d.id));
-  if (mails.some((m) => ["sent", "delivered", "bounced"].includes(m.status))) return { ok: false, reason: "already_sent" };
+  // "pending" = being handed to Resend right now: too late to stop.
+  if (mails.some((m) => ["pending", "sent", "delivered", "bounced"].includes(m.status))) return { ok: false, reason: "already_sent" };
   if (!mails.length) {
     // NO_CONTACT: no email; Undo is allowed within the same window the email would have had.
     const [ev] = await db.select({ poolId: evaluations.poolId }).from(evaluations).where(eq(evaluations.id, d.evaluationId));
@@ -161,8 +161,8 @@ export async function undo(decisionId: string, deps: Deps): Promise<UndoResult> 
     const delay = (pool.configJson as PoolConfig).sendDelayMinutes[d.action];
     if (now.getTime() > d.decidedAt.getTime() + delay * 60_000) return { ok: false, reason: "too_late" };
   } else {
-    if (!mails.some((m) => m.status === "scheduled" || m.status === "pending")) return { ok: false, reason: "too_late" };
-    // Resend is the source of truth for the race at send time: cancel, or learn it went out.
+    if (!mails.some((m) => m.status === "scheduled" || m.status === "failed")) return { ok: false, reason: "too_late" };
+    // One conditional UPDATE: if the sender claimed it a moment ago, this reports "already sent".
     const cancelled = await cancelDecisionEmails(d.id, deps);
     if (!cancelled.ok) return cancelled;
   }

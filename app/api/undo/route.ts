@@ -10,7 +10,6 @@ const MESSAGE: Record<string, string> = {
   already_sent: "Already sent: it can no longer be undone.",
   too_late: "Too late to undo.",
   not_found: "Nothing to undo.",
-  resend_error: "Resend did not confirm the cancellation. Try again.",
 };
 
 export async function POST(request: Request) {

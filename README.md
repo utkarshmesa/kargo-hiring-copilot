@@ -70,14 +70,15 @@ npm run dev                  # http://localhost:3000, log in with ADMIN_PASSWORD
 
 - **Advance / Hold / Decline** on the candidate card, with the exact email previewed. The decision records the tier the system recommended, so overrides are visible later. The first decision locks the pool's config.
 - Emails are the fixed templates in PRD Appendix B (`lib/email/templates.ts`) plus the privacy footer. The only AI-written text that can reach a candidate is the Advance "personal line", which Arjun sees and can edit. **Declines contain no AI text.**
-- Scheduled with Resend: Advance +10 min, Hold +10 min, Decline +24 h. **Undo** cancels the send until then; if Resend has already sent it, the card says so.
+- Advance +10 min, Hold +10 min, Decline +24 h. The app schedules these itself: the email waits in `emails` (status `scheduled`) and `/api/emails/send-due` sends it immediately once due. **Undo** cancels it until then; if the sender has already picked it up, the card says "already sent". (Resend's own scheduled sends failed on this account while immediate sends were delivered, verified 30 Sep 2026, so Resend scheduling is not used.)
+- Who calls `/api/emails/send-due`: any open dashboard page (every 30 s), the Supabase scheduler (every minute, see `docs/supabase-scheduler.sql`), and the daily cron. Each email is claimed with one conditional UPDATE, so concurrent callers can never send it twice, and the send-time check re-confirms the decision still stands.
 - `lib/email/send.ts` is the only file allowed to call Resend. It refuses any candidate email without a matching, non-undone decision. A unique index on `emails(decision_id, kind)` plus the Resend idempotency key `${decisionId}:${kind}` make a second send impossible. The digest is the only email without a decision and can only go to `ARJUN_EMAIL`.
 - `EMAIL_REDIRECT_TO` (set it everywhere except real go-live) sends every candidate email to a test inbox instead of the CV's address.
 - Replies go to `ARJUN_EMAIL`. Bounces arrive through `/api/webhooks/resend` (Svix signature verified on the raw body) and show a red **Bounced** flag.
 
 ## Daily cron (`/api/cron`, 09:00 IST)
 
-1. Reconciles emails past their send time with Resend (backstop for missed webhooks) and flags bounces.
+1. Sends any due emails, checks sent ones with Resend (backstop for missed webhooks) and flags bounces.
 2. Sends **one** nudge to candidates Advanced ≥ 3 days ago who haven't booked.
 3. Sends Arjun's digest (Holds due today at the top; waiting, interviewed, not booked, bounced, pipeline counts, weeks to 31 Dec).
 4. Deletes CV files and identity 180 days after a pool is closed, and strips all CV-derived text; numeric scores, tiers, flags, hashes and decisions are kept.
@@ -133,7 +134,9 @@ See [`.env.example`](.env.example) for every variable with a description. PRD Ap
    Use fresh random values for `ADMIN_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET`. Keep `HMAC_SECRET` fixed once CVs exist, or duplicate detection breaks.
 4. **Resend webhook:** Resend → Webhooks → add `https://<your-app>/api/webhooks/resend` for `email.sent`, `email.delivered`, `email.bounced`, `email.complained` and `email.failed`; put its signing secret in `RESEND_WEBHOOK_SECRET`.
 5. **Sending domain:** `onboarding@resend.dev` only delivers to your own Resend account address, which is enough for testing with `EMAIL_REDIRECT_TO`. For real candidates, verify a domain you own in Resend (a `*.vercel.app` domain can't be verified) and set `EMAIL_FROM` on it.
-6. **Go-live:** clear `EMAIL_REDIRECT_TO` only once the domain is verified, `BOOKING_URL` is real, and you have done one full test yourself.
+6. **Deployment Protection:** Resend's webhook, the cron and the Supabase scheduler call the app without a Vercel login. In Vercel → Settings → Deployment Protection, use *Standard Protection* (production domain public) or turn Vercel Authentication off; the app has its own login. Use the production domain from Settings → Domains everywhere.
+7. **Email scheduler:** run `docs/supabase-scheduler.sql` in Supabase → SQL Editor with your `APP_URL` and `CRON_SECRET`, so due emails go out within a minute even when no dashboard is open.
+8. **Go-live:** clear `EMAIL_REDIRECT_TO` only once the domain is verified, `BOOKING_URL` is real, and you have done one full test yourself.
 
 On the Hobby plan the cron fires once a day, anywhere within 09:00–10:00 IST.
 

@@ -3,7 +3,7 @@ import type { PoolConfig } from "./config/defaults";
 import { weeksLeft } from "./dates";
 import type { Db } from "./db/client";
 import { candidates, decisions, emails, evaluations, pools } from "./db/schema";
-import { sendDigest, sendForDecision, syncPastDueEmails, type ResendLike } from "./email/send";
+import { sendDigest, sendDueEmails, sendForDecision, syncSentEmails, type ResendLike } from "./email/send";
 import { log } from "./log";
 import { removeFiles } from "./storage";
 
@@ -19,13 +19,14 @@ export function istDate(d: Date): string {
 
 const nameOf = (c: { displayName: string | null; fileName: string | null }) => c.displayName ?? c.fileName ?? "a candidate";
 
-// 1. Emails whose webhook we missed: ask Resend, then flag bounces.
-export async function reconcileEmails(deps: Deps): Promise<number> {
-  const n = await syncPastDueEmails(deps);
+// 1. Send anything due, ask Resend about sent emails whose webhook we missed, flag bounces.
+export async function reconcileEmails(deps: Deps): Promise<{ sent: number; synced: number }> {
+  const sent = await sendDueEmails({ ...deps, limit: 100 });
+  const synced = await syncSentEmails(deps);
   await deps.db.execute(sql`
     UPDATE evaluations e SET flags = array(select distinct unnest(e.flags || ARRAY['BOUNCED']::text[]))
     WHERE NOT ('BOUNCED' = ANY(e.flags)) AND EXISTS (SELECT 1 FROM emails m WHERE m.evaluation_id = e.id AND m.status = 'bounced')`);
-  return n;
+  return { sent, synced };
 }
 
 // 2. One nudge to candidates Advanced, not Booked, ≥ nudgeAfterDays since the invite went out.

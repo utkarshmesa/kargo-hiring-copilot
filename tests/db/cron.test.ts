@@ -96,12 +96,13 @@ describe("digest (B.6)", () => {
 });
 
 describe("email reconciliation", () => {
-  it("updates past-due scheduled emails from Resend and flags bounces", async () => {
+  it("sends what is due, then learns from Resend what happened and flags bounces", async () => {
     const { e } = await candidate("Asha Rao");
     const { resend } = fakeResend("bounced");
     await decide({ evaluationId: e.id, action: "advance" }, { db, resend, now: () => T0 });
-    expect(await reconcileEmails({ db, resend, now: () => T0 })).toBe(0); // not due yet
-    expect(await reconcileEmails({ db, resend, now: () => days(1) })).toBe(1);
+    expect(await reconcileEmails({ db, resend, now: () => T0 })).toEqual({ sent: 0, synced: 0 }); // not due yet
+    expect(await reconcileEmails({ db, resend, now: () => days(1) })).toEqual({ sent: 1, synced: 0 }); // just sent: give the webhook time
+    expect(await reconcileEmails({ db, resend, now: () => days(2) })).toEqual({ sent: 0, synced: 1 });
     const [m] = await db.select().from(emails).where(eq(emails.evaluationId, e.id));
     expect(m.status).toBe("bounced");
     const [ev] = await db.select().from(evaluations).where(eq(evaluations.id, e.id));

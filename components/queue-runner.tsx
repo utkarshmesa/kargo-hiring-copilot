@@ -32,8 +32,14 @@ export default function QueueRunner({ concurrency }: { concurrency: number }) {
       setActive(0);
       if (processedAny) router.refresh();
     };
-    const first = setTimeout(drain, 500);
-    const every = setInterval(drain, 30_000);
+    // Due emails go out while the dashboard is open (the scheduler covers the rest).
+    const sendDue = () => fetch("/api/emails/send-due", { method: "POST" }).then((r) => r.json()).then((b) => b.sent && router.refresh()).catch(() => undefined);
+    const tick = () => {
+      drain();
+      sendDue();
+    };
+    const first = setTimeout(tick, 500);
+    const every = setInterval(tick, 30_000);
     window.addEventListener("kargo:drain", drain);
     return () => {
       clearTimeout(first);

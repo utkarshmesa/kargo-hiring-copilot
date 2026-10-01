@@ -12,9 +12,11 @@ export async function proxy(request: NextRequest) {
   }
   const ok = await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
   if (ok) return NextResponse.next();
-  // The daily cron drains the queue by calling process-next once per CV (PRD §8.2).
+  // Machine callers with the cron secret: the daily cron drains the queue one CV per call
+  // (PRD §8.2), and the scheduler sends due emails.
   const cronSecret = process.env.CRON_SECRET;
-  if (pathname === "/api/process-next" && cronSecret && request.headers.get("authorization") === `Bearer ${cronSecret}`) {
+  const machinePaths = ["/api/process-next", "/api/emails/send-due"];
+  if (machinePaths.includes(pathname) && cronSecret && request.headers.get("authorization") === `Bearer ${cronSecret}`) {
     return NextResponse.next();
   }
   if (pathname.startsWith("/api/")) {

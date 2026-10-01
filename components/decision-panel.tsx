@@ -57,7 +57,10 @@ export default function DecisionPanel(p: DecisionPanelProps) {
   const [role, setRole] = useState<Role>(p.roleApplied === "NOT_SURE" ? (p.bestFitRole ?? "PM") : p.roleApplied);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const countdown = useCountdown(p.active?.emailStatus === "scheduled" || p.active?.emailStatus === "pending" ? p.active.scheduledAt : p.undoWindowEnds);
+  const waiting = p.active?.emailStatus === "scheduled" || p.active?.emailStatus === "pending";
+  const countdown = useCountdown(waiting ? p.active!.scheduledAt : p.undoWindowEnds);
+  // Due but not yet handed to Resend: the dashboard's sender picks it up within 30 s.
+  const sendingNow = waiting && !countdown;
 
   async function post(url: string, body: object, done: string) {
     setBusy(true);
@@ -111,7 +114,13 @@ export default function DecisionPanel(p: DecisionPanelProps) {
 
       {p.noContact ? <p className="text-sm text-amber-900">No email on CV: decisions are recorded, but nothing can be sent.</p> : null}
 
-      {!(p.active && countdown) ? (
+      {sendingNow ? (
+        <p role="status" className="rounded border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+          {p.active!.action[0].toUpperCase() + p.active!.action.slice(1)} email · sending now…
+        </p>
+      ) : null}
+
+      {!(p.active && countdown) && !sendingNow ? (
         <div className="flex flex-wrap gap-2">
           {(["advance", "hold", "decline"] as Action[])
             .filter((a) => ALLOWED[a].includes(p.pipelineStatus))
