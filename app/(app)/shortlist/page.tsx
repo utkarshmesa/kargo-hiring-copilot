@@ -121,7 +121,7 @@ function Rows({ rows, empty, showReason }: { rows: Row[]; empty: string; showRea
         return (
           <li key={r.id} className="py-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/candidates/${r.id}`} className="font-medium hover:underline">
+              <Link href={`/candidates/${r.id}`} className="font-medium text-blue-800 underline decoration-blue-300 underline-offset-2 hover:decoration-blue-800">
                 {r.name}
               </Link>
               <TierBadge tier={r.tier} />
@@ -148,8 +148,14 @@ function Rows({ rows, empty, showReason }: { rows: Row[]; empty: string; showRea
               </p>
             ) : null}
             {r.summary ? <p className="mt-1 text-sm text-zinc-700">{r.summary}</p> : null}
-            <div className="mt-1">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
               <FlagBadges flags={r.flags} />
+              <Link
+                href={`/candidates/${r.id}`}
+                className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                {r.pipelineStatus && r.pipelineStatus !== "scored" ? "Open card →" : "Review & decide (Advance / Hold / Decline) →"}
+              </Link>
             </div>
           </li>
         );
