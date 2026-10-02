@@ -11,7 +11,11 @@ export default async function CalibrationBanner() {
     const database = db();
     passed = await calibrationPassed(database, await currentPool(database), modelId());
   } catch (err) {
-    problem = err instanceof Error ? err.message : "unknown error";
+    // Show the database's own reason (e.g. "password authentication failed"), not Drizzle's
+    // "Failed query: …" wrapper. Only Arjun sees this banner, and it carries no secrets.
+    const cause = (err as { cause?: { message?: string; code?: string } })?.cause;
+    const base = err instanceof Error ? err.message : "unknown error";
+    problem = cause?.message ? `database error: ${cause.message}${cause.code ? ` (${cause.code})` : ""}` : base;
   }
   if (passed) {
     return (
