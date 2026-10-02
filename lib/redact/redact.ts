@@ -124,13 +124,16 @@ export const PHONE_RE = /(?<![\w₹$€£])\+?\d[\d\s\-().]{8,}\d(?![\w%])/g;
 
 const MONTH = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC)";
 export const YEAR = "(?:19[5-9]\\d|20[0-3]\\d)";
+// "2000+ employees", "1999 shipments" are counts, not years: company size matters for D3/D7.
+export const NOT_A_COUNT =
+  "(?![%\\d]|\\s*\\+|\\s+(?:employees|staff|people|members|engineers|clients|customers|users|merchants|shipments|containers|orders|accounts|units|stores|trucks|vehicles|SKUs|tickets)\\b)";
 const DATE_PATTERNS: RegExp[] = [
   new RegExp(`\\b${MONTH}\\.?,?\\s*(?:${YEAR}|'\\d{2})\\b`, "g"),
   /\b\d{1,2}[/.-]\d{1,2}[/.-](?:\d{4}|\d{2})\b/g,
   new RegExp(`\\b${YEAR}[/-](?:0?[1-9]|1[0-2])\\b(?![/-]\\d)`, "g"),
   new RegExp(`\\b(?:0?[1-9]|1[0-2])/${YEAR}\\b`, "g"),
   /\bFY\s?'?\d{2}(?:\d{2})?(?:\s*[-–/]\s*'?\d{2,4})?\b/g,
-  new RegExp(`(?<![₹$€£#\\d.,])\\b${YEAR}(?:\\s*[-–]\\s*\\d{2})?\\b(?![%\\d])`, "g"),
+  new RegExp(`(?<![₹$€£#\\d.,])\\b${YEAR}(?:\\s*[-–]\\s*\\d{2})?\\b${NOT_A_COUNT}`, "g"),
 ];
 
 const PRONOUNS: [RegExp, string][] = [

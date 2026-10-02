@@ -16,7 +16,8 @@
     "regress": "tsx scripts/regress.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "db:local": "tsx scripts/local-db.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "try": "tsx scripts/try.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

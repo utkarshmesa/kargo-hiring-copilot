@@ -1,5 +1,5 @@
 import { lists } from "./lists";
-import { EMAIL_RE, PHONE_RE, URL_RE, YEAR, termRegex, type Terms } from "./redact";
+import { EMAIL_RE, NOT_A_COUNT, PHONE_RE, URL_RE, YEAR, termRegex, type Terms } from "./redact";
 
 // Step 5.5: the leak check. Runs on the final rendered profile. Any hit → needs_review
 // (tier R, redaction_leak). Returns categories only: the leaked values are never logged.
@@ -22,7 +22,7 @@ const MONTH_YEAR = new RegExp(
   `\\b(Jan(uary)?|Feb(ruary)?|Mar(ch)?|Apr(il)?|May|June?|July?|Aug(ust)?|Sep(t(ember)?)?|Oct(ober)?|Nov(ember)?|Dec(ember)?)\\.?,?\\s*${YEAR}\\b`,
   "i",
 );
-const BARE_YEAR = new RegExp(`(?<![₹$€£#\\d.,])\\b${YEAR}\\b(?![%\\d])`);
+const BARE_YEAR = new RegExp(`(?<![₹$€£#\\d.,])\\b${YEAR}\\b${NOT_A_COUNT}`);
 const GENDERED = /\b(he|she|him|her|his|hers|himself|herself)\b/i;
 // Honorifics are case-sensitive so "MS Excel" is not a leak.
 const HONORIFIC = /\b(Mr|Mrs|Ms|Miss|Smt|Shri)\b\.?(?=\s)/;

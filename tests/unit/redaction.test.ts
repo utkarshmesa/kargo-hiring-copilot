@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { checkLeaks } from "@/lib/redact/leak";
 import { buildRedactedProfile } from "@/lib/redact/profile";
-import { buildTerms, companyTerms, emptyCounts, redactText } from "@/lib/redact/redact";
+import { buildTerms, companyTerms, emptyCounts, redactText, renderPlaceholders } from "@/lib/redact/redact";
 import { sampleExtractor } from "../fixtures/extractor";
 
 const AS_OF = new Date("2026-09-28T00:00:00Z");
@@ -131,5 +131,21 @@ describe("company terms", () => {
 
   it("ignores self-employment", () => {
     expect(companyTerms("Self-employed")).toEqual([]);
+  });
+});
+
+describe("counts that look like years", () => {
+  const terms = buildTerms(sampleExtractor());
+  it.each([
+    ["Financial Technology, 2000+ employees", "Financial Technology, 2000+ employees"],
+    ["handled 1999 shipments a month", "handled 1999 shipments a month"],
+    ["grew to 2010 clients", "grew to 2010 clients"],
+  ])("keeps %j", (input, want) => {
+    expect(redactText(input, terms, emptyCounts())).toBe(want);
+    expect(checkLeaks(`[SUMMARY]\n${want}\n`, terms)).toEqual([]);
+  });
+
+  it("still removes real years", () => {
+    expect(renderPlaceholders(redactText("Joined in 2019, promoted 2021", terms, emptyCounts()))).toBe("Joined in [DATE], promoted [DATE]");
   });
 });
